@@ -1,0 +1,65 @@
+diff --git a/src/video_core/renderer_opengl/renderer_opengl.cpp b/src/video_core/renderer_opengl/renderer_opengl.cpp
+index 09aad77..ffae685 100644
+--- a/src/video_core/renderer_opengl/renderer_opengl.cpp
++++ b/src/video_core/renderer_opengl/renderer_opengl.cpp
+@@ -295,9 +295,10 @@ void RendererOpenGL::LoadFBToScreenInfo(const Pica::FramebufferConfig& framebuff
+     // only allows rows to have a memory alignement of 4.
+     ASSERT(pixel_stride % 4 == 0);
+ 
+-    if (color_fill.is_enabled ||
+-        !rasterizer.AccelerateDisplay(framebuffer, framebuffer_addr, static_cast<u32>(pixel_stride),
+-                                      screen_info)) {
++    const bool accelerated = !color_fill.is_enabled &&
++        rasterizer.AccelerateDisplay(framebuffer, framebuffer_addr, static_cast<u32>(pixel_stride),
++                                     screen_info);
++    if (!accelerated) {
+         u32 width = framebuffer.width;
+         u32 height = framebuffer.height;
+         u8 fill_pixel[3];
+@@ -336,6 +337,46 @@ void RendererOpenGL::LoadFBToScreenInfo(const Pica::FramebufferConfig& framebuff
+         state.texture_units[0].texture_2d = 0;
+         state.Apply();
+     }
++#ifdef POCKET_HOST_RENDER_DIAG
++    const int screen = &screen_info == &screen_infos[0] ? 0 :
++                       &screen_info == &screen_infos[2] ? 1 : -1;
++    if (screen >= 0) {
++        static unsigned visits[2]{};
++        static unsigned printed[2]{};
++        static bool saw_color[2]{};
++        static bool saw_accelerated[2]{};
++        static bool saw_address[2]{};
++        const unsigned visit = ++visits[screen];
++        auto byte_at = [&](u64 offset) -> int {
++            if (!framebuffer_addr || offset > 0xffffffffULL - framebuffer_addr) return -1;
++            const u8* byte = system.Memory().GetPhysicalPointer(
++                framebuffer_addr + static_cast<PAddr>(offset));
++            return byte ? *byte : -1;
++        };
++        const int first[3] = {byte_at(0), byte_at(1), byte_at(2)};
++        const bool colored = first[0] > 0 || first[1] > 0 || first[2] > 0;
++        const bool first_color = colored && !saw_color[screen];
++        const bool first_accelerated = accelerated && !saw_accelerated[screen];
++        const bool first_address = framebuffer_addr && !saw_address[screen];
++        saw_color[screen] |= colored;
++        saw_accelerated[screen] |= accelerated;
++        saw_address[screen] |= framebuffer_addr != 0;
++        if (printed[screen] < 8 &&
++            (visit == 1 || visit == 16 || visit == 256 || visit == 1024 ||
++             visit == 4096 || first_color || first_accelerated || first_address)) {
++            ++printed[screen];
++            const u64 center = u64(framebuffer.height.Value() / 2) * framebuffer.stride +
++                               u64(framebuffer.width.Value() / 2) * bpp;
++            LOG_INFO(Render_OpenGL,
++                     "POCKET_HOST_FB screen={} visit={} fill={} active={} addr={:#x} "
++                     "stride={} format={:#x} accelerated={} first={},{},{} center={},{},{}",
++                     screen, visit, bool(color_fill.is_enabled), u32(framebuffer.active_fb),
++                     framebuffer_addr, u32(framebuffer.stride), u32(framebuffer.format),
++                     accelerated, first[0], first[1], first[2], byte_at(center),
++                     byte_at(center + 1), byte_at(center + 2));
++        }
++    }
++#endif
+ }
+ 
+ /**

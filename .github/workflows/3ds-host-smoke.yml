@@ -41,3 +41,34 @@ jobs:
           name: three-ds-host-frame
           path: .cache/three_ds-native/runtime/*.ppm
           if-no-files-found: warn
+
+  diagnostic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/download-artifact@v4
+        with:
+          name: three-ds-homebrew
+          path: tests/three_ds
+      - name: Verify installed software graphics runtime
+        run: |
+          dpkg-query -W libgl1 libgl1-mesa-dri libx11-6 xvfb
+          ldconfig -p | grep -F libGL.so.1
+          ldconfig -p | grep -F libX11.so.6
+          command -v xvfb-run
+          test -r /usr/lib/x86_64-linux-gnu/dri/swrast_dri.so
+      - name: Build exact-pinned diagnostic core
+        run: ./scripts/build-3ds-host-diagnostic.sh
+      - name: Verify diagnostic source patch
+        run: python3 -m unittest tests/test_azahar_host_diagnostic.py
+      - name: Run diagnostic 3DS core with real homebrew
+        run: timeout --kill-after=10 180 ./scripts/test-3ds-native.sh tests/three_ds/smoke.3dsx .cache/three_ds-core-diagnostic/libazahar_libretro.so
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: three-ds-host-diagnostic-frame
+          path: .cache/three_ds-native/runtime/*.ppm
+          if-no-files-found: warn
