@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -96,6 +97,54 @@ static void test_malformed_rom(const fs::path& rom, const fs::path& root) {
     require(rejected, "truncated ROM was accepted");
 }
 
+static void expect_rejected_arm7_range(const fs::path& rom, const fs::path& root,
+                                       const char* name, uint32_t start, uint32_t size,
+                                       const char* message) {
+    std::ifstream input(rom, std::ios::binary);
+    std::vector<uint8_t> image{std::istreambuf_iterator<char>(input),
+                               std::istreambuf_iterator<char>()};
+    require(image.size() == 32768, "expected the full-size original fixture");
+    for (int i = 0; i < 4; ++i) {
+        image[0x30 + i] = static_cast<uint8_t>(start >> (8 * i));
+        image[0x3c + i] = static_cast<uint8_t>(size >> (8 * i));
+    }
+    uint16_t crc = 0xffff;
+    for (size_t i = 0; i < 0x15e; ++i) {
+        crc ^= image[i];
+        for (int bit = 0; bit < 8; ++bit)
+            crc = (crc >> 1) ^ ((crc & 1) ? 0xa001 : 0);
+    }
+    image[0x15e] = static_cast<uint8_t>(crc);
+    image[0x15f] = static_cast<uint8_t>(crc >> 8);
+    const fs::path malformed = root / name;
+    std::ofstream output(malformed, std::ios::binary);
+    output.write(reinterpret_cast<const char*>(image.data()), image.size());
+    output.close();
+    bool rejected = false;
+    try {
+        const uint64_t token = pocket::open(malformed.string(), root.string(), root.string());
+        pocket::close(token);
+    } catch (const std::runtime_error&) {
+        rejected = true;
+    }
+    require(rejected, message);
+}
+
+static void test_rejects_partial_word_at_rom_tail(const fs::path& rom, const fs::path& root) {
+    expect_rejected_arm7_range(rom, root, "partial-word.nds", 32767, 1,
+                               "byte-valid partial ARM7 word at ROM tail was accepted");
+}
+
+static void test_rejects_unaligned_arm7_offset(const fs::path& rom, const fs::path& root) {
+    expect_rejected_arm7_range(rom, root, "unaligned-arm7.nds", 0x401, 4,
+                               "unaligned ARM7 file offset was accepted");
+}
+
+static void test_rejects_arm7_range_crossing_rom_tail(const fs::path& rom, const fs::path& root) {
+    expect_rejected_arm7_range(rom, root, "crossing-tail.nds", 32766, 4,
+                               "ARM7 word crossing the ROM tail was accepted");
+}
+
 static void test_stale_close(const fs::path& rom, const fs::path& root) {
     const uint64_t old = pocket::open(rom.string(), root.string(), root.string());
     pocket::close(old);
@@ -119,6 +168,9 @@ int main(int argc, char** argv) {
         test_input(rom, root);
         test_audio(rom, root);
         test_malformed_rom(rom, root);
+        test_rejects_partial_word_at_rom_tail(rom, root);
+        test_rejects_unaligned_arm7_offset(rom, root);
+        test_rejects_arm7_range_crossing_rom_tail(rom, root);
         test_stale_close(rom, root);
         std::cout << "DS_NATIVE_SMOKE_PASS\n";
     } catch (const std::exception& error) {

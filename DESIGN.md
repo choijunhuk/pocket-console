@@ -13,9 +13,9 @@
 
 ## Product goals
 - One Android app with three distinct handheld experiences.
-- Deliverable v0.1: installable native frontend with DS/3DS/Switch controller previews and persistent local game-file catalog.
+- Deliverable v0.2: integrated DS player plus DS/3DS/Switch controller previews and persistent local game-file catalog.
 - Longer-term: integrated, separately maintained native cores, DS first, then 3DS, then Switch.
-- Non-goals for v0.1: actual emulation, game downloads, firmware/key distribution, cloud accounts, multiplayer, billing.
+- Non-goals for v0.2: 3DS/Switch execution, game downloads, firmware/key distribution, cloud accounts, multiplayer, billing, quick saves.
 - Success: native build/test/lint pass; library survives restart; unsupported execution is clearly described; controller demo responds to input.
 
 ## Personas and jobs
@@ -25,7 +25,7 @@
 ## Information architecture
 - Library: select DS / 3DS / Switch, import a file, see imported titles, open a controller preview.
 - Controller preview: two screens for DS/3DS, one for Switch, touch feedback, back to library.
-- Imported files display a core-pending explanation; the preview is a control test, never a game.
+- DS entries open the actual player; 3DS/Switch entries display a core-pending explanation. Controller previews remain labeled control tests.
 
 ## Design principles
 - Hardware silhouette, inset screens, hinge, speaker grille, and raised buttons establish the handheld feeling.
@@ -36,7 +36,7 @@
 - Warm paper background #F3F0E8; ink #202826; soft gray hardware #DADDD5; LCD green #C8D6A3; restrained orange #CC633F.
 - System sans-serif and monospace status labels; no downloadable fonts.
 - Rhythm: 8dp units, 20–24dp page edges, rounded hardware shell and inset screen borders.
-- DS: warm gray clamshell, equal screens, hinge, D-pad and ABXY.
+- DS: warm gray clamshell, equal screens, hinge, D-pad and ABXY. In gameplay, fit both displays and 48dp controls in a normal 360x640dp viewport; use an adjacent control panel in landscape.
 - 3DS: darker shell, wider upper screen, smaller touch screen, circle pad.
 - Switch: landscape, dark center screen, muted blue and orange side controllers.
 - Motion: brief press feedback; no compulsory startup animation. Original vector/drawn artwork only.
@@ -69,8 +69,8 @@
 - Use “조작 미리보기” and “코어 연결 예정”; never label a demo as emulation.
 
 ## Implementation constraints
-- Native Android SDK/Java 17, minSdk 26, target/compile SDK 36, Gradle wrapper.
-- No UI runtime dependencies; no engine binaries in v0.1. Model checks require only the JDK.
+- Native Android SDK/Java 17, minSdk 26, target/compile SDK 36, Gradle wrapper and pinned NDK 27.1.12297006.
+- No UI runtime dependencies. DS embeds pinned libretro/melonDS with tracked correctness/build patches; model checks require only the JDK.
 - Before core integration: review the exact upstream revision, license and security patches.
 - Validate build, lint, file classification/deduplication, and on-device interaction separately.
 

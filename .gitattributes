@@ -2,3 +2,5 @@
 gradlew text eol=lf
 *.bat text eol=crlf
 *.jar binary
+# Unified diff context lines preserve an initial space, including empty lines.
+*.patch whitespace=-blank-at-eol

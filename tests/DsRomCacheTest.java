@@ -38,6 +38,18 @@ public final class DsRomCacheTest {
         edge[0x22] = (byte) 0xff;
         edge[0x23] = (byte) 0xff;
         expectFailure(new ByteArrayInputStream(edge), dir);
+        byte[] unalignedOffset = new byte[32768];
+        System.arraycopy(first, 0, unalignedOffset, 0, first.length);
+        put32(unalignedOffset, 0x30, 32767);
+        put32(unalignedOffset, 0x3c, 1);
+        expectFailure(new ByteArrayInputStream(unalignedOffset), dir);
+        byte[] unalignedWordOffset = first.clone();
+        put32(unalignedWordOffset, 0x30, 641);
+        expectFailure(new ByteArrayInputStream(unalignedWordOffset), dir);
+        byte[] partialTail = Arrays.copyOf(first, 1023);
+        put32(partialTail, 0x30, 1020);
+        put32(partialTail, 0x3c, 3);
+        expectFailure(new ByteArrayInputStream(partialTail), dir);
         expectFailure(new InputStream() {
             private int count;
             @Override public int read() throws IOException {

@@ -4,6 +4,8 @@ The DS build embeds [libretro/melonDS](https://github.com/libretro/melonDS), pin
 
 melonDS is copyright Arisotura and its contributors, licensed under GNU GPL version 3 or later. The Libretro frontend, in-tree libretro-common, FreeBIOS and other upstream components retain their individual copyright and license notices. Their complete source and notices remain in the pinned submodule. No proprietary Nintendo BIOS, firmware, artwork or games are included.
 
+Local patches under `patches/` are applied by `scripts/prepare-core.py`: preserve pending SRAM at close and select the correct GNU `strerror_r` signature on Android. Include these patches and the preparation/build scripts with corresponding source for any distributed binary.
+
 Pocket Console's combined DS build is provided under GPLv3-or-later; see LICENSE. Source for this private development build is in this repository, including the exact submodule revision and Android build recipe. Before distributing a build to anyone without repository access, provide its corresponding source and notices together with it.
 
 Original native smoke-test homebrew is generated from source under `tests/native`; it contains no Nintendo logo or other console firmware assets.

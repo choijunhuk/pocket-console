@@ -57,7 +57,8 @@ uint32_t little32(const std::vector<uint8_t>& bytes, size_t offset) {
 void requireExecutable(const std::vector<uint8_t>& rom, size_t offset) {
     const uint32_t start = little32(rom, offset);
     const uint32_t size = little32(rom, offset + 12);
-    if (size == 0 || start < 512 || start > rom.size() || size > rom.size() - start)
+    if (size < 4 || (start & 3) || (size & 3) || start < 512 ||
+        start > rom.size() || size > rom.size() - start)
         throw std::runtime_error("Invalid DS executable range");
 }
 

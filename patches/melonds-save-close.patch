@@ -1,0 +1,65 @@
+diff --git a/src/libretro/libretro.cpp b/src/libretro/libretro.cpp
+--- a/src/libretro/libretro.cpp
++++ b/src/libretro/libretro.cpp
+@@ -927,6 +927,7 @@ bool retro_load_game(const struct retro_game_info *info)
+ 
+ void retro_unload_game(void)
+ {
++   NDSCart::FlushSRAMFile();
+    NDS::DeInit();
+ }
+ 
+diff --git a/src/NDSCart_SRAMManager.cpp b/src/NDSCart_SRAMManager.cpp
+--- a/src/NDSCart_SRAMManager.cpp
++++ b/src/NDSCart_SRAMManager.cpp
+@@ -65,6 +65,8 @@ void DeInit()
+         Platform::Thread_Free(FlushThread);
+         FlushSecondaryBuffer();
+     }
++#else
++    FlushSecondaryBuffer();
+ #endif
+ 
+     if (SecondaryBuffer) delete SecondaryBuffer;
+@@ -160,6 +162,7 @@ void FlushSecondaryBuffer(u8* dst, s32 dstLength)
+ #ifndef __LIBRETRO__
+     Platform::Mutex_Lock(SecondaryBufferLock);
+ #endif
++    bool flushed = true;
+     if (dst)
+     {
+         memcpy(dst, SecondaryBuffer, SecondaryBufferLength);
+@@ -170,12 +173,16 @@ void FlushSecondaryBuffer(u8* dst, s32 dstLength)
+         if (f)
+         {
+             printf("NDS SRAM: Written\n");
+-            fwrite(SecondaryBuffer, SecondaryBufferLength, 1, f);
+-            fclose(f);
++            bool written = fwrite(SecondaryBuffer, SecondaryBufferLength, 1, f) == 1;
++            flushed = fclose(f) == 0 && written;
+         }
++        else flushed = false;
+     }
+-    PreviousFlushVersion = FlushVersion;
+-    TimeAtLastFlushRequest = 0;
++    if (flushed)
++    {
++        PreviousFlushVersion = FlushVersion;
++        TimeAtLastFlushRequest = 0;
++    }
+ #ifndef __LIBRETRO__
+     Platform::Mutex_Unlock(SecondaryBufferLock);
+ #endif
+diff --git a/src/dolphin/CommonFuncs.cpp b/src/dolphin/CommonFuncs.cpp
+--- a/src/dolphin/CommonFuncs.cpp
++++ b/src/dolphin/CommonFuncs.cpp
+@@ -28,7 +28,8 @@ std::string LastStrerrorString()
+   // We check defines in order to figure out variant is in use, and we store the returned value
+   // to a variable so that we'll get a compile-time check that our assumption was correct.
+ 
+-#if defined(__GLIBC__) && (_GNU_SOURCE || (_POSIX_C_SOURCE < 200112L && _XOPEN_SOURCE < 600))
++#if (defined(__GLIBC__) && (_GNU_SOURCE || (_POSIX_C_SOURCE < 200112L && _XOPEN_SOURCE < 600))) || \
++    (defined(__ANDROID__) && defined(_GNU_SOURCE))
+   const char* str = strerror_r(errno, error_message, BUFFER_SIZE);
+   return std::string(str);
+ #else

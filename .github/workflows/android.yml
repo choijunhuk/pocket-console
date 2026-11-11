@@ -17,7 +17,10 @@ jobs:
         with:
           submodules: recursive
       - name: Run real DS core smoke
-        run: ./scripts/test-native.sh
+        run: |
+          python3 scripts/prepare-core.py
+          ./scripts/test-save-flush.sh
+          ./scripts/test-native.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -95,13 +98,19 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect
           script: |
+            adb shell wm size 720x1280
+            adb shell wm density 320
             adb install artifacts/outputs/apk/debug/app-debug.apk
             adb install artifacts/outputs/apk/androidTest/debug/app-debug-androidTest.apk
             adb shell am instrument -w -r dev.pocketconsole.test/dev.pocketconsole.DsSmokeInstrumentation | tee android-native-smoke.log
             grep 'DS_ANDROID_SMOKE_PASS' android-native-smoke.log
+            adb exec-out run-as dev.pocketconsole cat cache/smoke-player.png > android-player.png
+            base64 -w0 android-player.png | sed 's/^/DS_SCREENSHOT_BASE64:/'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: android-native-smoke
-          path: android-native-smoke.log
+          path: |
+            android-native-smoke.log
+            android-player.png
           if-no-files-found: warn

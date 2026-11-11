@@ -354,7 +354,8 @@ public final class DsPlayerActivity extends Activity {
                 int chunk = bufferBytes / 2;
                 while (remaining > 0 && !paused && !stopped) {
                     int wrote = audio.write(samples, offset, Math.min(remaining, chunk), AudioTrack.WRITE_NON_BLOCKING);
-                    if (wrote <= 0) break;
+                    if (wrote < 0) throw new IOException("오디오 출력 실패 (" + wrote + ")");
+                    if (wrote == 0) { LockSupport.parkNanos(1_000_000); continue; }
                     offset += wrote;
                     remaining -= wrote;
                 }

@@ -2,6 +2,17 @@ plugins {
     id("com.android.application")
 }
 
+val prepareDsCore by tasks.registering(Exec::class) {
+    workingDir(rootProject.projectDir)
+    commandLine("python3", "scripts/prepare-core.py")
+}
+
+tasks.configureEach {
+    if (name == "preBuild" || name.startsWith("configureNdkBuild") || name.startsWith("buildNdkBuild")) {
+        dependsOn(prepareDsCore)
+    }
+}
+
 android {
     namespace = "dev.pocketconsole"
     compileSdk = 36

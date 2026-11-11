@@ -203,11 +203,14 @@ public final class DsSmokeInstrumentation extends Instrumentation {
     private void testPlayerUi(File rom) throws Exception {
         Intent intent = new Intent().setClassName(getTargetContext().getPackageName(),
                 "dev.pocketconsole.DsPlayerActivity");
-        intent.putExtra("rom_uri", Uri.fromFile(rom).toString());
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        intent.putExtra(DsPlayerActivity.EXTRA_ROM_URI, Uri.fromFile(rom).toString());
         Activity activity = startActivitySync(intent);
         require(activity != null, "DS player did not start");
         Button a = null;
         try {
+            runOnMainSync(() -> activity.setRequestedOrientation(
+                    ActivityInfo.SCREEN_ORIENTATION_PORTRAIT));
             long deadline = SystemClock.uptimeMillis() + 15000;
             boolean running = false;
             while (SystemClock.uptimeMillis() < deadline && !running) {
@@ -228,7 +231,7 @@ public final class DsSmokeInstrumentation extends Instrumentation {
             require(a != null && buttons[1] != null, "A/B controls missing");
             final Button aButton = a;
 
-            Bitmap screenshot = awaitColor(false, 10000);
+            Bitmap screenshot = awaitColor(false, 10000, -1);
             require(screenshot != null, "player screenshot has no blue DS pixels");
             requireFullyVisible(a, screenshot, "A control is off-screen");
             requireFullyVisible(buttons[1], screenshot, "B control is off-screen");
@@ -237,7 +240,7 @@ public final class DsSmokeInstrumentation extends Instrumentation {
             runOnMainSync(aButton::performClick);
             Thread.sleep(150); // The click pulse lasts 100 ms; then hold A for the screenshot poll.
             runOnMainSync(() -> dispatchButton(aButton, MotionEvent.ACTION_DOWN));
-            screenshot = awaitColor(true, 10000);
+            screenshot = awaitColor(true, 10000, -1);
             require(screenshot != null, "player screenshot did not turn green after A");
             File output = new File(getTargetContext().getCacheDir(), "smoke-player.png");
             try (FileOutputStream stream = new FileOutputStream(output)) {
@@ -250,7 +253,7 @@ public final class DsSmokeInstrumentation extends Instrumentation {
 
             runOnMainSync(() -> activity.setRequestedOrientation(
                     ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE));
-            Bitmap landscape = awaitColor(false, 10000, true);
+            Bitmap landscape = awaitColor(false, 10000, 1);
             require(landscape != null, "landscape player did not show blue DS pixels");
             requireFullyVisible(buttons[0], landscape, "A control is off-screen in landscape");
             requireFullyVisible(buttons[1], landscape, "B control is off-screen in landscape");
@@ -272,18 +275,15 @@ public final class DsSmokeInstrumentation extends Instrumentation {
         finally { event.recycle(); }
     }
 
-    private Bitmap awaitColor(boolean green, long timeoutMs) throws InterruptedException {
-        return awaitColor(green, timeoutMs, false);
-    }
-
-    private Bitmap awaitColor(boolean green, long timeoutMs, boolean landscapeOnly)
+    private Bitmap awaitColor(boolean green, long timeoutMs, int orientation)
             throws InterruptedException {
         long deadline = SystemClock.uptimeMillis() + timeoutMs;
         while (SystemClock.uptimeMillis() < deadline) {
             Bitmap screenshot = getUiAutomation().takeScreenshot();
             if (screenshot != null) {
                 int count = 0;
-                if (!landscapeOnly || screenshot.getWidth() > screenshot.getHeight()) {
+                if (orientation == 0 || (orientation < 0 && screenshot.getHeight() > screenshot.getWidth()) ||
+                        (orientation > 0 && screenshot.getWidth() > screenshot.getHeight())) {
                     for (int y = 0; y < screenshot.getHeight(); y += 2) {
                         for (int x = 0; x < screenshot.getWidth(); x += 2) {
                             if (colorMatches(screenshot.getPixel(x, y), green)) count++;

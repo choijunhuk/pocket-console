@@ -82,7 +82,8 @@ final class DsRomCache {
     private static void section(byte[] header, int offsetAt, int sizeAt, long length) throws IOException {
         long offset = unsigned32(header, offsetAt);
         long size = unsigned32(header, sizeAt);
-        if (offset < 512 || size == 0 || offset + size > length) {
+        if (offset < 512 || size == 0 || ((offset | size) & 3) != 0
+                || offset + size > length) {
             throw new IOException("Invalid DS ARM section bounds");
         }
     }
