@@ -1,5 +1,6 @@
 .gradle/
 .cache/
+.worktrees/
 __pycache__/
 *.pyc
 .idea/
