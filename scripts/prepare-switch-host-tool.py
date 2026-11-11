@@ -60,6 +60,7 @@ def main():
     parser.add_argument("--build", type=Path, default=DEFAULT_BUILD)
     parser.add_argument("--repository", help="Local Git repository for offline tests")
     parser.add_argument("--source-only", action="store_true", help="Verify source without building")
+    parser.add_argument("--cmake-version", choices=("3.31.5", "3.31.6"), default="3.31.5")
     args = parser.parse_args()
 
     lock = json.loads(args.lock.read_text())
@@ -73,10 +74,10 @@ def main():
         return
 
     sdk = Path(os.environ.get("ANDROID_SDK_ROOT") or os.environ.get("ANDROID_HOME") or "")
-    cmake = sdk / "cmake/3.31.5/bin/cmake"
-    ninja = sdk / "cmake/3.31.5/bin/ninja"
+    cmake = sdk / f"cmake/{args.cmake_version}/bin/cmake"
+    ninja = sdk / f"cmake/{args.cmake_version}/bin/ninja"
     if not cmake.is_file() or not ninja.is_file():
-        raise RuntimeError("Android SDK CMake 3.31.5 including Ninja is required for the host shader tool")
+        raise RuntimeError(f"Android SDK CMake {args.cmake_version} including Ninja is required for the host shader tool")
     build = args.build.resolve()
     subprocess.run([str(cmake), "-S", str(source), "-B", str(build), "-G", "Ninja",
                     f"-DCMAKE_MAKE_PROGRAM={ninja}", "-DCMAKE_BUILD_TYPE=Release",

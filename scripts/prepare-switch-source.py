@@ -13,6 +13,10 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_LOCK = ROOT / "third_party/switch-hokkaido.lock.json"
 DEFAULT_OUTPUT = ROOT / ".cache/hokkaido-source"
 MARKER = ".pocket-console-source.json"
+REPOSITORIES = {
+    "Hokkaido": "https://github.com/pavelgajdo/Hokkaido.git",
+    "Eden": "https://github.com/eden-emulator/mirror.git",
+}
 
 
 def git(*args, cwd=None):
@@ -24,53 +28,61 @@ def git(*args, cwd=None):
 
 
 def verify_source(output, lock):
+    name = lock["name"]
     if git("rev-parse", "HEAD", cwd=output) != lock["commit"]:
-        raise ValueError("Hokkaido source commit mismatch")
+        raise ValueError(f"{name} source commit mismatch")
     if subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], cwd=output,
                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
-        raise ValueError("Hokkaido source must be detached")
+        raise ValueError(f"{name} source must be detached")
     status = git("submodule", "status", "--recursive", cwd=output)
     if any(line.startswith(("-", "+", "U")) for line in status.splitlines()):
-        raise ValueError("Hokkaido submodule is missing or differs from its pinned gitlink")
+        raise ValueError(f"{name} submodule is missing or differs from its pinned gitlink")
     if git("status", "--porcelain", "--untracked-files=no", "--ignore-submodules=untracked", cwd=output):
-        raise ValueError("Hokkaido source has modified tracked files")
+        raise ValueError(f"{name} source has modified tracked files")
     nested = subprocess.run(["git", "submodule", "foreach", "--quiet", "--recursive",
                              "git diff --quiet HEAD --"], cwd=output,
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if nested.returncode:
-        raise ValueError("Hokkaido submodule has modified tracked files")
+        raise ValueError(f"{name} submodule has modified tracked files")
     if not (output / "CMakeLists.txt").is_file() or not (
             output / "src/android/app/src/main/jni/CMakeLists.txt").is_file():
-        raise ValueError("Hokkaido Android native target is missing")
+        raise ValueError(f"{name} Android native target is missing")
     return status
 
 
 def prepare(lock_path, output, repository=None):
     lock = json.loads(lock_path.read_text())
+    name = lock.get("name")
     if not re.fullmatch(r"[0-9a-f]{40}", lock["commit"]):
-        raise ValueError("invalid Hokkaido commit pin")
+        raise ValueError("invalid Switch source commit pin")
     if lock["abi"] != "arm64-v8a":
-        raise ValueError("Hokkaido probe supports arm64-v8a only")
-    if not re.fullmatch(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\.git",
-                        lock["repository"]):
-        raise ValueError("Hokkaido repository must be a credential-free GitHub HTTPS URL")
-    if not re.fullmatch(r"[A-Za-z0-9_.-]+", lock["tag"]):
+        raise ValueError("Switch source probe supports arm64-v8a only")
+    if name not in REPOSITORIES or lock["repository"] != REPOSITORIES[name]:
+        raise ValueError("Switch source repository is not allowlisted")
+    if name == "Hokkaido" and not re.fullmatch(r"[A-Za-z0-9_.-]+", lock.get("tag", "")):
         raise ValueError("invalid Hokkaido tag")
+    if name == "Eden" and lock.get("ref") != "master":
+        raise ValueError("unexpected Eden source reference")
 
     output = output.resolve()
     if output.exists():
         if not (output / MARKER).is_file() or json.loads((output / MARKER).read_text()) != lock:
-            raise ValueError(f"existing Hokkaido source has a different lock: {output}")
+            raise ValueError(f"existing {name} source has a different lock: {output}")
         verify_source(output, lock)
         return output
 
     output.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="hokkaido-source-", dir=output.parent) as temp_name:
+    with tempfile.TemporaryDirectory(prefix=f"{name.lower()}-source-", dir=output.parent) as temp_name:
         source = Path(temp_name) / "source"
-        git("clone", "--depth", "1", "--single-branch", "--branch", lock["tag"],
-            repository or lock["repository"], str(source))
-        if git("rev-parse", "HEAD", cwd=source) != lock["commit"]:
-            raise ValueError("Hokkaido tag resolved to a different commit")
+        if name == "Hokkaido":
+            git("clone", "--depth", "1", "--single-branch", "--branch", lock["tag"],
+                repository or lock["repository"], str(source))
+            if git("rev-parse", "HEAD", cwd=source) != lock["commit"]:
+                raise ValueError("Hokkaido tag resolved to a different commit")
+        else:
+            git("init", "-q", str(source))
+            git("remote", "add", "origin", repository or lock["repository"], cwd=source)
+            git("fetch", "--depth", "1", "origin", lock["commit"], cwd=source)
         git("checkout", "--detach", lock["commit"], cwd=source)
         git("submodule", "update", "--init", "--recursive", cwd=source)
         status = verify_source(source, lock)

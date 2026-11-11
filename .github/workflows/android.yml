@@ -2,7 +2,7 @@ name: Android
 
 on:
   push:
-    branches-ignore: [feat/switch-backends]
+    branches-ignore: [feat/switch-backends, feat/switch1-eden]
   pull_request:
   workflow_dispatch:
 

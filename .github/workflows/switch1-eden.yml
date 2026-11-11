@@ -1,0 +1,64 @@
+name: Switch 1 Eden source build probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/switch1-eden]
+    paths:
+      - third_party/switch-eden.lock.json
+      - third_party/switch-glslang.lock.json
+      - scripts/prepare-switch-source.py
+      - scripts/prepare-switch-host-tool.py
+      - scripts/build-switch-probe.sh
+      - scripts/build-switch1-probe.sh
+      - tests/test_switch_eden_source.py
+      - .github/workflows/switch1-eden.yml
+
+permissions:
+  contents: read
+
+jobs:
+  eden-upstream-arm64:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: Install pinned Android toolchain
+        run: sdkmanager 'ndk;30.0.16248370' 'cmake;3.31.6'
+      - name: Verify both source preparation paths
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_switch_source.py' -v
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_switch_eden_source.py' -v
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_switch_host_tool.py' -v
+      - uses: actions/cache@v4
+        id: eden-cache
+        with:
+          path: .cache/switch-probes/eden-arm64-v8a
+          key: eden-upstream-ndk30.0.16248370-cmake3.31.6-${{ hashFiles('third_party/switch-eden.lock.json', 'third_party/switch-glslang.lock.json', 'scripts/prepare-switch-source.py', 'scripts/prepare-switch-host-tool.py', 'scripts/build-switch-probe.sh', 'scripts/build-switch1-probe.sh') }}
+      - name: Build exact Eden Android source
+        if: steps.eden-cache.outputs.cache-hit != 'true'
+        run: ./scripts/build-switch1-probe.sh
+      - name: Verify architecture, dependencies and source notices
+        run: |
+          cd .cache/switch-probes/eden-arm64-v8a
+          sha256sum --check SHA256SUMS
+          test -s eden-upstream-probe.so
+          test -s shared-libraries.txt
+          test -s license-files.txt
+          test -s cxx-runtime-sha256.txt
+          test -s sdl-java-bootstrap.tar.gz
+          test -s sdl-java-sha256.txt
+          grep -q AArch64 probe-elf-header.txt
+          grep -q 'SONAME.*libyuzu-android.so' probe-dynamic-section.txt
+          grep -q '(NEEDED)' probe-dynamic-section.txt
+          grep -q 'LICENSE.txt' license-files.txt
+          grep -E '(SONAME|NEEDED)' probe-dynamic-section.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eden-upstream-source-probe-arm64
+          path: .cache/switch-probes/eden-arm64-v8a/
+          if-no-files-found: error
