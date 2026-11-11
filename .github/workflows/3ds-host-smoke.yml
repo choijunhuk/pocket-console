@@ -60,10 +60,25 @@ jobs:
           ldconfig -p | grep -F libX11.so.6
           command -v xvfb-run
           test -r /usr/lib/x86_64-linux-gnu/dri/swrast_dri.so
+      - name: Identify host compiler
+        id: toolchain
+        run: echo "version=$(c++ -dumpfullversion)-$(cmake --version | head -1 | tr ' ' '_')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v4
+        id: host-build-cache
+        with:
+          path: .cache/azahar-host-build
+          key: azahar-host-${{ runner.os }}-${{ steps.toolchain.outputs.version }}-${{ hashFiles('third_party/azahar.lock.json', 'patches/azahar-retro-run-error.patch') }}-${{ hashFiles('patches/azahar-host-render-diag.patch', 'scripts/prepare-3ds-source.py', 'scripts/build-3ds-host-diagnostic.sh') }}
+          restore-keys: |
+            azahar-host-${{ runner.os }}-${{ steps.toolchain.outputs.version }}-${{ hashFiles('third_party/azahar.lock.json', 'patches/azahar-retro-run-error.patch') }}-
       - name: Build exact-pinned diagnostic core
         run: ./scripts/build-3ds-host-diagnostic.sh
       - name: Verify diagnostic source patch
         run: python3 -m unittest tests/test_azahar_host_diagnostic.py
+      - uses: actions/cache/save@v4
+        if: steps.host-build-cache.outputs.cache-hit != 'true'
+        with:
+          path: .cache/azahar-host-build
+          key: azahar-host-${{ runner.os }}-${{ steps.toolchain.outputs.version }}-${{ hashFiles('third_party/azahar.lock.json', 'patches/azahar-retro-run-error.patch') }}-${{ hashFiles('patches/azahar-host-render-diag.patch', 'scripts/prepare-3ds-source.py', 'scripts/build-3ds-host-diagnostic.sh') }}
       - name: Run diagnostic 3DS core with real homebrew
         run: timeout --kill-after=10 180 ./scripts/test-3ds-native.sh tests/three_ds/smoke.3dsx .cache/three_ds-core-diagnostic/libazahar_libretro.so
       - uses: actions/upload-artifact@v4

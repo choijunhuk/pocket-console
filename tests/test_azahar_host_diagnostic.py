@@ -12,8 +12,8 @@ import unittest
 ROOT = Path(__file__).resolve().parent.parent
 PATCH = ROOT / "patches/azahar-host-render-diag.patch"
 BASE_HASH = "22006232527c236f72cfd2bc1310e3f198c5e2a88a6fbb0a700062b10880f09e"
-PATCHED_HASH = "cbbf76a3b078e5a1d4e7adab0ee6e721948b236cb55d3adec57a696cf9f06b7c"
-PATCH_HASH = "166d635636ab6e655d2fd63320e17fb6338608114222aace38b427a954412186"
+PATCHED_HASH = "11ea5e71564c08c77ca2486d27884a226124cc5fedc7f8962a0d04e845e817f0"
+PATCH_HASH = "84b04abd60e6abf27bf35b8be8daeee9098dbb706b9cf52e920bbb000afeda57"
 RELATIVE = Path("src/video_core/renderer_opengl/renderer_opengl.cpp")
 
 
