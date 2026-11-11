@@ -1,0 +1,57 @@
+name: 3DS core
+
+on:
+  push:
+    branches: [feat/3ds-emulation]
+    paths:
+      - third_party/azahar.lock.json
+      - scripts/prepare-3ds-source.py
+      - scripts/build-3ds-core.sh
+      - .github/workflows/3ds-core.yml
+      - tests/test_azahar_source.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [arm64-v8a, x86_64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: Install Azahar toolchain
+        run: sdkmanager 'ndk;29.0.14206865' 'cmake;4.1.2'
+      - name: Verify source preparation
+        run: python3 -m unittest discover -s tests -p test_azahar_source.py -v
+      - uses: actions/cache@v4
+        id: core-cache
+        with:
+          path: .cache/3ds-cores/${{ matrix.abi }}
+          key: azahar-2126.2-${{ matrix.abi }}-${{ hashFiles('third_party/azahar.lock.json', 'scripts/prepare-3ds-source.py', 'scripts/build-3ds-core.sh') }}
+      - name: Build Azahar
+        if: steps.core-cache.outputs.cache-hit != 'true'
+        run: ./scripts/build-3ds-core.sh '${{ matrix.abi }}'
+      - name: Verify artifact contents
+        run: |
+          cd '.cache/3ds-cores/${{ matrix.abi }}'
+          sha256sum --check SHA256SUMS
+          test -s libazahar_libretro.so
+          tar -tzf licenses.tar.gz > /dev/null
+      - uses: actions/upload-artifact@v4
+        with:
+          name: azahar-core-${{ matrix.abi }}
+          path: .cache/3ds-cores/${{ matrix.abi }}/
+          if-no-files-found: error
