@@ -255,6 +255,12 @@ public final class DsSmokeInstrumentation extends Instrumentation {
                     ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE));
             Bitmap landscape = awaitColor(false, 10000, 1);
             require(landscape != null, "landscape player did not show blue DS pixels");
+            runOnMainSync(() -> {
+                buttons[0] = (Button) findText(activity.getWindow().getDecorView(), "A");
+                buttons[1] = (Button) findText(activity.getWindow().getDecorView(), "B");
+            });
+            require(buttons[0] != null && buttons[1] != null, "landscape A/B controls missing");
+            a = buttons[0];
             requireFullyVisible(buttons[0], landscape, "A control is off-screen in landscape");
             requireFullyVisible(buttons[1], landscape, "B control is off-screen in landscape");
             landscape.recycle();

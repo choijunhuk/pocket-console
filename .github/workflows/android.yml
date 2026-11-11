@@ -103,9 +103,9 @@ jobs:
             adb install artifacts/outputs/apk/debug/app-debug.apk
             adb install artifacts/outputs/apk/androidTest/debug/app-debug-androidTest.apk
             adb shell am instrument -w -r dev.pocketconsole.test/dev.pocketconsole.DsSmokeInstrumentation | tee android-native-smoke.log
-            grep 'DS_ANDROID_SMOKE_PASS' android-native-smoke.log
             adb exec-out run-as dev.pocketconsole cat cache/smoke-player.png > android-player.png
             base64 -w0 android-player.png | sed 's/^/DS_SCREENSHOT_BASE64:/'
+            grep 'DS_ANDROID_SMOKE_PASS' android-native-smoke.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
