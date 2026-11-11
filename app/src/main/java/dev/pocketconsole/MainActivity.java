@@ -2,27 +2,41 @@ package dev.pocketconsole;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.graphics.Color;
+import android.graphics.Insets;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.ParcelFileDescriptor;
 import android.provider.OpenableColumns;
+import android.content.ContentResolver;
+import android.view.DisplayCutout;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowInsets;
+import android.window.OnBackInvokedCallback;
+import android.window.OnBackInvokedDispatcher;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.io.FileNotFoundException;
+import java.lang.ref.WeakReference;
 import java.util.List;
 import java.util.LinkedHashSet;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public final class MainActivity extends Activity {
     private static final int PICK_FILE = 10;
@@ -33,6 +47,11 @@ public final class MainActivity extends Activity {
     private static final int SHELL = Color.rgb(218, 221, 213);
     private static final String KEY_CONSOLE = "console";
     private static final String KEY_PREVIEW = "preview";
+    private static final String UI_PREFS = "console_ui";
+    private static final String LIBRARY_PREFS = "game_library_v1";
+    // Process lifetime keeps a selected document import running through activity recreation.
+    private static final ExecutorService DOCUMENT_IO = Executors.newSingleThreadExecutor();
+    private static final Handler MAIN = new Handler(Looper.getMainLooper());
 
     private LibraryStore library;
     private ConsoleType selected = ConsoleType.DS;
@@ -41,22 +60,59 @@ public final class MainActivity extends Activity {
     private LinearLayout page;
     private TextView pressedStatus;
     private final Set<String> pressedButtons = new LinkedHashSet<>();
+    private SharedPreferences uiPreferences;
+    private SharedPreferences libraryPreferences;
+    private boolean backRegistered;
+    private Object previewBack;
+    private final SharedPreferences.OnSharedPreferenceChangeListener libraryChanged = (prefs, key) ->
+            MAIN.post(() -> { if (!isFinishing() && !isDestroyed() && !preview) render(); });
+    private final SharedPreferences.OnSharedPreferenceChangeListener selectionChanged = (prefs, key) ->
+            MAIN.post(() -> {
+                if (isFinishing() || isDestroyed() || !KEY_CONSOLE.equals(key)) return;
+                ConsoleType restored = consoleForId(uiPreferences.getString(KEY_CONSOLE, null));
+                if (restored != null) { selected = restored; render(); }
+            });
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         library = new LibraryStore(this);
+        uiPreferences = getSharedPreferences(UI_PREFS, MODE_PRIVATE);
+        libraryPreferences = getSharedPreferences(LIBRARY_PREFS, MODE_PRIVATE);
         if (state != null) {
             ConsoleType restored = consoleForId(state.getString(KEY_CONSOLE));
             if (restored != null) selected = restored;
             preview = state.getBoolean(KEY_PREVIEW);
         } else {
-            ConsoleType restored = consoleForId(getPreferences(MODE_PRIVATE).getString(KEY_CONSOLE, null));
+            ConsoleType restored = consoleForId(uiPreferences.getString(KEY_CONSOLE, null));
             if (restored != null) selected = restored;
         }
         getWindow().setStatusBarColor(PAPER);
         getWindow().setNavigationBarColor(PAPER);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
         render();
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        uiPreferences.registerOnSharedPreferenceChangeListener(selectionChanged);
+        libraryPreferences.registerOnSharedPreferenceChangeListener(libraryChanged);
+        ConsoleType restored = consoleForId(uiPreferences.getString(KEY_CONSOLE, null));
+        if (restored != null && restored != selected) { selected = restored; render(); }
+        else if (!preview) render();
+    }
+
+    @Override protected void onPause() {
+        uiPreferences.unregisterOnSharedPreferenceChangeListener(selectionChanged);
+        libraryPreferences.unregisterOnSharedPreferenceChangeListener(libraryChanged);
+        super.onPause();
+    }
+
+    @Override protected void onDestroy() {
+        if (Build.VERSION.SDK_INT >= 33 && backRegistered) {
+            BackApi33.unregister(this, previewBack);
+            backRegistered = false;
+        }
+        super.onDestroy();
     }
 
     private ConsoleType consoleForId(String id) {
@@ -71,6 +127,7 @@ public final class MainActivity extends Activity {
     }
 
     @Override public void onBackPressed() {
+        if (Build.VERSION.SDK_INT >= 33) { super.onBackPressed(); return; }
         if (preview) { preview = false; render(); }
         else super.onBackPressed();
     }
@@ -124,10 +181,38 @@ public final class MainActivity extends Activity {
     }
 
     private void render() {
+        if (Build.VERSION.SDK_INT >= 33) {
+            if (preview && !backRegistered) {
+                previewBack = BackApi33.register(this);
+                backRegistered = true;
+            } else if (!preview && backRegistered) {
+                BackApi33.unregister(this, previewBack);
+                previewBack = null;
+                backRegistered = false;
+            }
+        }
         LinearLayout root = column();
         root.setBackgroundColor(PAPER);
         root.setOnApplyWindowInsetsListener((view, insets) -> {
-            view.setPadding(0, insets.getSystemWindowInsetTop(), 0, insets.getSystemWindowInsetBottom());
+            if (Build.VERSION.SDK_INT >= 30) {
+                Insets safe = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                view.setPadding(safe.left, safe.top, safe.right, safe.bottom);
+            } else {
+                int left = insets.getSystemWindowInsetLeft();
+                int top = insets.getSystemWindowInsetTop();
+                int right = insets.getSystemWindowInsetRight();
+                int bottom = insets.getSystemWindowInsetBottom();
+                if (Build.VERSION.SDK_INT >= 28) {
+                    DisplayCutout cutout = insets.getDisplayCutout();
+                    if (cutout != null) {
+                        left = Math.max(left, cutout.getSafeInsetLeft());
+                        top = Math.max(top, cutout.getSafeInsetTop());
+                        right = Math.max(right, cutout.getSafeInsetRight());
+                        bottom = Math.max(bottom, cutout.getSafeInsetBottom());
+                    }
+                }
+                view.setPadding(left, top, right, bottom);
+            }
             return insets;
         });
         ScrollView scroll = new ScrollView(this);
@@ -164,7 +249,7 @@ public final class MainActivity extends Activity {
             tabs.addView(tab, params);
             tab.setOnClickListener(v -> {
                 selected = type;
-                getPreferences(MODE_PRIVATE).edit().putString(KEY_CONSOLE, type.id).apply();
+                uiPreferences.edit().putString(KEY_CONSOLE, type.id).apply();
                 notice = null;
                 render();
             });
@@ -253,30 +338,48 @@ public final class MainActivity extends Activity {
             return;
         }
         Uri uri = data.getData();
-        String name = displayName(uri);
+        Context app = getApplicationContext();
+        WeakReference<MainActivity> target = new WeakReference<>(this);
+        showNotice("파일을 확인하고 있어요…");
+        DOCUMENT_IO.execute(() -> {
+            ImportResult resultValue = importDocument(app, uri);
+            MAIN.post(() -> {
+                MainActivity activity = target.get();
+                if (activity == null || activity.isDestroyed() || activity.isFinishing()) return;
+                if (resultValue.console != null) activity.selected = resultValue.console;
+                activity.showNotice(resultValue.message);
+            });
+        });
+    }
+
+    private static final class ImportResult {
+        final ConsoleType console;
+        final String message;
+        ImportResult(ConsoleType console, String message) { this.console = console; this.message = message; }
+    }
+
+    private static ImportResult importDocument(Context app, Uri uri) {
+        ContentResolver resolver = app.getContentResolver();
+        String name = displayName(resolver, uri);
         ConsoleType type = ConsoleType.fromFileName(name);
-        if (type == null) {
-            showNotice("지원할 파일 형식을 인식하지 못했어요.");
-            return;
-        }
+        if (type == null) return new ImportResult(null, "지원할 파일 형식을 인식하지 못했어요.");
         try {
-            try (android.os.ParcelFileDescriptor file = getContentResolver().openFileDescriptor(uri, "r")) {
+            try (ParcelFileDescriptor file = resolver.openFileDescriptor(uri, "r")) {
                 if (file == null) throw new FileNotFoundException();
             }
-            getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            boolean added = library.add(name, uri.toString(), type);
-            selected = type;
-            getPreferences(MODE_PRIVATE).edit().putString(KEY_CONSOLE, type.id).apply();
-            showNotice(added ? "파일을 목록에 추가했어요. 실행은 코어 연결 후 가능해요." : "이미 가져온 파일이에요.");
+            resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            boolean added = new LibraryStore(app).add(name, uri.toString(), type);
+            app.getSharedPreferences(UI_PREFS, MODE_PRIVATE).edit().putString(KEY_CONSOLE, type.id).commit();
+            return new ImportResult(type, added ? "파일을 목록에 추가했어요. 실행은 코어 연결 후 가능해요." : "이미 가져온 파일이에요.");
         } catch (IllegalStateException e) {
-            showNotice("파일 목록을 저장할 수 없어요. 다시 시도해 주세요.");
+            return new ImportResult(null, "파일 목록을 저장할 수 없어요. 다시 시도해 주세요.");
         } catch (Exception e) {
-            showNotice("파일을 읽을 수 없어요. 파일 접근 권한을 확인해 주세요.");
+            return new ImportResult(null, "파일을 읽을 수 없어요. 파일 접근 권한을 확인해 주세요.");
         }
     }
 
-    private String displayName(Uri uri) {
-        try (Cursor cursor = getContentResolver().query(uri, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+    private static String displayName(ContentResolver resolver, Uri uri) {
+        try (Cursor cursor = resolver.query(uri, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
             if (cursor != null && cursor.moveToFirst()) {
                 String name = cursor.getString(0);
                 if (name != null && !name.isEmpty()) return name;
@@ -286,21 +389,36 @@ public final class MainActivity extends Activity {
     }
 
     private void openEntry(LibraryStore.Entry entry) {
-        try (android.os.ParcelFileDescriptor file = getContentResolver().openFileDescriptor(Uri.parse(entry.uri), "r")) {
-            if (file == null) throw new FileNotFoundException();
-            new AlertDialog.Builder(this).setTitle("코어 연결 예정")
-                    .setMessage(entry.name + "\n\n파일을 읽을 수 있어요. 게임 실행 코어는 아직 연결되지 않았습니다. 조작 미리보기에서 버튼 반응만 확인할 수 있어요.")
-                    .setPositiveButton("조작 미리보기", (dialog, which) -> { selected = entry.console; preview = true; render(); })
-                    .setNegativeButton("닫기", null).show();
-        } catch (Exception e) {
-            new AlertDialog.Builder(this).setTitle("파일 접근 불가")
-                    .setMessage("파일을 읽을 수 없어요. 이동하거나 접근 권한이 해제되었을 수 있습니다. 목록에서 지울 수 있어요.")
-                    .setPositiveButton("목록에서 지우기", (dialog, which) -> {
-                        try { library.remove(entry.uri); render(); }
-                        catch (RuntimeException failure) { showNotice("파일 목록을 저장할 수 없어요. 다시 시도해 주세요."); }
-                    })
-                    .setNegativeButton("유지", null).show();
-        }
+        Context app = getApplicationContext();
+        WeakReference<MainActivity> target = new WeakReference<>(this);
+        showNotice("파일 접근을 확인하고 있어요…");
+        DOCUMENT_IO.execute(() -> {
+            boolean readable;
+            try (ParcelFileDescriptor file = app.getContentResolver().openFileDescriptor(Uri.parse(entry.uri), "r")) {
+                readable = file != null;
+            } catch (Exception e) { readable = false; }
+            boolean canRead = readable;
+            MAIN.post(() -> {
+                MainActivity activity = target.get();
+                if (activity == null || activity.isDestroyed() || activity.isFinishing() || activity.preview) return;
+                activity.notice = null;
+                activity.render();
+                if (canRead) {
+                    new AlertDialog.Builder(activity).setTitle("코어 연결 예정")
+                            .setMessage(entry.name + "\n\n파일을 읽을 수 있어요. 게임 실행 코어는 아직 연결되지 않았습니다. 조작 미리보기에서 버튼 반응만 확인할 수 있어요.")
+                            .setPositiveButton("조작 미리보기", (dialog, which) -> { activity.selected = entry.console; activity.preview = true; activity.render(); })
+                            .setNegativeButton("닫기", null).show();
+                } else {
+                    new AlertDialog.Builder(activity).setTitle("파일 접근 불가")
+                            .setMessage("파일을 읽을 수 없어요. 이동하거나 접근 권한이 해제되었을 수 있습니다. 목록에서 지울 수 있어요.")
+                            .setPositiveButton("목록에서 지우기", (dialog, which) -> {
+                                try { activity.library.remove(entry.uri); activity.render(); }
+                                catch (RuntimeException failure) { activity.showNotice("파일 목록을 저장할 수 없어요. 다시 시도해 주세요."); }
+                            })
+                            .setNegativeButton("유지", null).show();
+                }
+            });
+        });
     }
 
     private void showNotice(String message) { notice = message; render(); }
@@ -392,5 +510,18 @@ public final class MainActivity extends Activity {
         String value = pressedButtons.isEmpty() ? "누른 버튼: 없음" : "누른 버튼: " + String.join(", ", pressedButtons);
         pressedStatus.setText(value);
         pressedStatus.setContentDescription(value);
+    }
+
+    @android.annotation.TargetApi(33)
+    private static final class BackApi33 {
+        static OnBackInvokedCallback register(MainActivity activity) {
+            OnBackInvokedCallback callback = () -> { activity.preview = false; activity.render(); };
+            activity.getOnBackInvokedDispatcher().registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, callback);
+            return callback;
+        }
+
+        static void unregister(MainActivity activity, Object callback) {
+            activity.getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback((OnBackInvokedCallback) callback);
+        }
     }
 }
