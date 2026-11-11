@@ -122,10 +122,13 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - uses: reactivecircus/android-emulator-runner@v2
+        env:
+          POCKET_CI_EMULATOR: '1'
         with:
           api-level: 35
           arch: x86_64
           profile: pixel_2
+          avd-name: pocket-console-ci
           disable-animations: true
           emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader
           script: ./scripts/test-android-smoke.sh
@@ -135,6 +138,8 @@ jobs:
           name: android-native-smoke
           path: |
             android-native-smoke.log
+            android-failure-logcat.txt
+            android-failure-activities.txt
             android-player.png
             three-ds-android-smoke.log
             three-ds-player-portrait.png

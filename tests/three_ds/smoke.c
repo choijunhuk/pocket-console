@@ -55,7 +55,9 @@ static void fill(gfxScreen_t screen, u8 blue, u8 green, u8 red)
 
 int main(void)
 {
+    svcOutputDebugString("THREEDS_GFX_INIT_BEGIN", sizeof("THREEDS_GFX_INIT_BEGIN") - 1);
     gfxInitDefault();
+    svcOutputDebugString("THREEDS_GFX_INIT_END", sizeof("THREEDS_GFX_INIT_END") - 1);
     int sound = 0; /* 0 awaits X, 1 plays, -1 marks DSP startup failure. */
 
     while (aptMainLoop()) {

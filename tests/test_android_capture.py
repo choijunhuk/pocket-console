@@ -74,16 +74,22 @@ class AndroidCaptureTests(unittest.TestCase):
 
 
 class AndroidSmokePrerequisiteTests(unittest.TestCase):
-    def run_smoke(self, gles):
+    def run_smoke(self, gles, timed_out=False):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             adb = root / "adb"
             adb.write_text(f"#!{sys.executable}\n" + FAKE_ADB)
             adb.chmod(0o755)
+            # CI uses GNU timeout; the fixture forwards commands on macOS.
+            timeout = root / "timeout"
+            timeout.write_text('#!/bin/sh\nif [ "$FAKE_TIMEOUT" = yes ]; then exit 124; fi\nshift 2\nexec "$@"\n')
+            timeout.chmod(0o755)
             (root / "scripts").mkdir()
             (root / "scripts/capture-android-ui.sh").symlink_to(SCRIPT)
+            (root / "scripts/stop-ci-emulator.py").symlink_to(SCRIPT.with_name("stop-ci-emulator.py"))
             env = dict(os.environ, PATH=f"{root}:{os.environ['PATH']}",
-                       FAKE_ADB_ROOT=str(root), FAKE_READY="yes", FAKE_GLES=gles)
+                       FAKE_ADB_ROOT=str(root), FAKE_READY="yes", FAKE_GLES=gles,
+                       FAKE_TIMEOUT="yes" if timed_out else "no")
             result = subprocess.run(["sh", str(SCRIPT.with_name("test-android-smoke.sh"))],
                                     cwd=root, env=env, text=True, capture_output=True)
             calls = [json.loads(line) for line in (root / "calls.jsonl").read_text().splitlines()]
@@ -107,6 +113,12 @@ class AndroidSmokePrerequisiteTests(unittest.TestCase):
         self.assertIn("fixture runtime failure", result.stdout)
         self.assertTrue(any(call[-1].endswith(".ThreeDsSmokeInstrumentation") for call in calls))
         self.assertNotIn("THREEDS_ANDROID_SMOKE_NOT_RUN_GLES", result.stdout)
+
+    def test_timeout_preserves_failure_and_collects_diagnostics(self):
+        result, calls = self.run_smoke("196610", timed_out=True)
+        self.assertEqual(result.returncode, 124)
+        self.assertNotIn("DS_ANDROID_SMOKE_PASS", result.stdout)
+        self.assertIn(["logcat", "-d", "-v", "threadtime"], calls)
 
 
 if __name__ == "__main__":

@@ -28,7 +28,7 @@ import java.util.Arrays;
 
 /** Runs the original DS homebrew against the packaged JNI and core on an emulator. */
 public final class DsSmokeInstrumentation extends Instrumentation {
-    private static final String TAG = "DsSmoke";
+    private static final String TAG = "PocketDsSmoke";
     private static final int WIDTH = 256;
     private static final int HEIGHT = 384;
     private Method open;
@@ -65,11 +65,13 @@ public final class DsSmokeInstrumentation extends Instrumentation {
                 int count;
                 while ((count = source.read(chunk)) != -1) target.write(chunk, 0, count);
             }
+            Log.i(TAG, "native_checks_begin");
             testVideo(rom, root);
             testInput(rom, root);
             testAudio(rom, root);
             testMalformedRom(rom, root);
             testStaleClose(rom, root);
+            Log.i(TAG, "native_checks_end");
             testPlayerUi(rom, root);
             result.putString("stream", "DS_ANDROID_SMOKE_PASS cache/smoke-player.png");
             Log.i(TAG, "DS_ANDROID_SMOKE_PASS");
@@ -205,7 +207,9 @@ public final class DsSmokeInstrumentation extends Instrumentation {
                 "dev.pocketconsole.DsPlayerActivity");
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         intent.putExtra(DsPlayerActivity.EXTRA_ROM_URI, Uri.fromFile(rom).toString());
+        Log.i(TAG, "player_launch_begin");
         Activity activity = startActivitySync(intent);
+        Log.i(TAG, "player_launch_returned");
         require(activity != null, "DS player did not start");
         Button a = null;
         try {
@@ -283,6 +287,7 @@ public final class DsSmokeInstrumentation extends Instrumentation {
             Button exit = (Button) findText(activity.getWindow().getDecorView(), "‹  라이브러리");
             require(exit != null, "DS library exit button missing");
             exit.performClick();
+            Log.i(TAG, "exit_requested");
             require(findText(activity.getWindow().getDecorView(),
                     "종료 중 · 게임 내 저장 마무리") != null,
                     "DS closing status was not shown before leaving the player");
@@ -293,14 +298,19 @@ public final class DsSmokeInstrumentation extends Instrumentation {
             Thread.sleep(100);
         }
         require(activity.isFinishing(), "DS player did not finish after native close");
+        Log.i(TAG, "exit_finish_observed");
     }
 
     private void testFreshSessionAfterExit(File rom, File root) throws Exception {
+        Log.i(TAG, "fresh_native_open_begin");
         long fresh = open(rom, root);
+        Log.i(TAG, "fresh_native_open_success");
         try {
             frame(fresh, 0);
+            Log.i(TAG, "fresh_native_frame_success");
         } finally {
             close(fresh);
+            Log.i(TAG, "fresh_native_open_end");
         }
     }
 
