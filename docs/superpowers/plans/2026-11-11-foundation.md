@@ -27,31 +27,32 @@
 ### Task 1: Repository and Android build foundation
 **Files:** root Gradle files/wrapper, app manifest/resources, `.github/workflows/android.yml`, `README.md`, `docs/architecture.md`.
 **Interfaces:** namespace `dev.pocketconsole`, launch `MainActivity`, Java 17 source.
-- [ ] Create private GitHub repository and local git repository.
-- [ ] Add reproducible wrapper and Android build/lint/test CI producing a debug APK.
-- [ ] Document actual feature status and core integration sequence, with official sources.
+- [x] Create private GitHub repository and local git repository.
+- [x] Add reproducible wrapper and Android build/lint/test CI producing a debug APK.
+- [x] Document actual feature status and core integration sequence, with official sources.
 
 ### Task 2: File model and local catalog
 **Files:** `ConsoleType.java`, `LibraryStore.java`, `tests/ConsoleTypeTest.java`.
 **Interfaces:** `ConsoleType` enum DS / THREE_DS / SWITCH with `id`, `label`, `subtitle`, `accepts(String)`, static `fromFileName(String)`. `LibraryStore(Context)`; `entries(ConsoleType)` returns `List<Entry>`; `add(String name, String uri, ConsoleType)` returns boolean (false on duplicate); `remove(String uri)`; `Entry.name`, `.uri`, `.console`.
-- [ ] Run failing classification tests before writing the model.
-- [ ] Implement extension classification and a durable, non-destructive URI catalog.
-- [ ] Test invalid names, case, unsupported types and console boundaries.
+- [x] Run failing classification tests before writing the model.
+- [x] Implement extension classification and a durable, non-destructive URI catalog.
+- [x] Test invalid names, case, unsupported types and console boundaries.
 
 ### Task 3: Console-inspired native frontend
 **Files:** `MainActivity.java`, `ConsolePreviewView.java` (if needed), drawable resources.
 **Interfaces:** consumes Task 2 exactly. Owns library screen, SAF imports, selection persistence and distinct controller previews.
-- [ ] Implement the DESIGN.md hardware language using Android Views.
-- [ ] Separate controller tests from real gameplay and explain unintegrated cores.
-- [ ] Check accessibility labels, file access failures and orientation handling.
+- [x] Implement the DESIGN.md hardware language using Android Views.
+- [x] Separate controller tests from real gameplay and explain unintegrated cores.
+- [x] Check accessibility labels, file access failures and orientation handling.
 
 ### Task 4: Verify and publish the starting point
 **Files:** `docs/verification.md`; optional generated screenshots outside source.
-- [ ] Run local checks; if sandbox prevents Gradle sockets or ADB, use GitHub Actions for build/lint/model checks and record device/visual checks as NOT_RUN.
-- [ ] Review changes for bugs and accidental secrets/ROMs.
-- [ ] Commit using Lore trailers, push, confirm remote visibility and CI result.
-- [ ] Download/verify APK if CI succeeds; report repo, local folder, actual features and remaining core work.
+- [x] Run local checks; if sandbox prevents Gradle sockets or ADB, use GitHub Actions for build/lint/model checks and record device/visual checks as NOT_RUN.
+- [x] Review changes for bugs and accidental secrets/ROMs.
+- [x] Commit using Lore trailers, push, confirm remote visibility and CI result.
+- [x] Verify APK signature, package metadata and checksum in CI; report repo, local folder, actual features and remaining core work. Local archive download was attempted but blocked.
 
 ## Execution decisions
 - Use a dependency-free Java model-check runner instead of JUnit: Maven DNS is blocked locally, and this small model needs no testing runtime. The same script runs in CI.
 - Local Gradle and ADB socket access is denied; compile Java with the installed Android SDK and verify the complete APK with GitHub Actions.
+- Final evidence: CI run 42982986468 passed for code commit 9a18862; package, debug signature and APK checksum verified on the runner. Device/visual acceptance remains explicitly NOT_RUN.
