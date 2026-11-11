@@ -7,8 +7,10 @@ on:
     paths:
       - third_party/switch*.lock.json
       - scripts/prepare-switch-source.py
+      - scripts/prepare-switch-host-tool.py
       - scripts/build-switch-probe.sh
       - tests/test_switch_source.py
+      - tests/test_switch_host_tool.py
       - .github/workflows/switch-backends.yml
 
 permissions:
@@ -27,12 +29,14 @@ jobs:
       - name: Install pinned Android toolchain
         run: sdkmanager 'ndk;28.2.13676358' 'cmake;3.31.5'
       - name: Verify source preparation
-        run: python3 -m unittest discover -s tests -p test_switch_source.py -v
+        run: |
+          python3 -m unittest discover -s tests -p test_switch_source.py -v
+          python3 -m unittest discover -s tests -p test_switch_host_tool.py -v
       - uses: actions/cache@v4
         id: probe-cache
         with:
           path: .cache/switch-probes/hokkaido-arm64-v8a
-          key: hokkaido-probe-ndk28.2-cmake3.31.5-${{ hashFiles('third_party/switch-hokkaido.lock.json', 'scripts/prepare-switch-source.py', 'scripts/build-switch-probe.sh') }}
+          key: hokkaido-probe-ndk28.2-cmake3.31.5-${{ hashFiles('third_party/switch-hokkaido.lock.json', 'third_party/switch-glslang.lock.json', 'scripts/prepare-switch-source.py', 'scripts/prepare-switch-host-tool.py', 'scripts/build-switch-probe.sh') }}
       - name: Build pinned upstream Android target
         if: steps.probe-cache.outputs.cache-hit != 'true'
         run: ./scripts/build-switch-probe.sh arm64-v8a

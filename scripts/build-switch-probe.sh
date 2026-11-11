@@ -21,7 +21,13 @@ fi
 source_dir="$repo_root/.cache/hokkaido-source"
 build_dir="$repo_root/.cache/hokkaido-build/$abi"
 output_dir="$repo_root/.cache/switch-probes/hokkaido-$abi"
+validator="$repo_root/.cache/glslang-host-build/StandAlone/glslangValidator"
 python3 "$repo_root/scripts/prepare-switch-source.py" --output "$source_dir"
+python3 "$repo_root/scripts/prepare-switch-host-tool.py"
+if [[ ! -x "$validator" ]]; then
+  echo "Pinned host glslangValidator is missing: $validator" >&2
+  exit 1
+fi
 if [[ -e "$output_dir" ]]; then
   echo "Probe output already exists: $output_dir" >&2
   exit 2
@@ -35,6 +41,7 @@ fi
   -DENABLE_QT=OFF -DENABLE_WEB_SERVICE=ON -DANDROID_ARM_NEON=ON \
   -DYUZU_USE_CPM=ON -DCPMUTIL_FORCE_BUNDLED=ON \
   -DYUZU_USE_BUNDLED_FFMPEG=ON -DYUZU_USE_BUNDLED_SDL3=ON \
+  -DGLSLANGVALIDATOR="$validator" \
   -DBUILD_TESTING=OFF -DYUZU_TESTS=OFF -DDYNARMIC_TESTS=OFF
 "$cmake" --build "$build_dir" --target yuzu-android --parallel 2
 
@@ -50,7 +57,11 @@ stage="$(mktemp -d "$(dirname "$output_dir")/.hokkaido-$abi.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
 cp "${binaries[0]}" "$stage/hokkaido-upstream-probe.so"
 cp "$repo_root/third_party/switch-hokkaido.lock.json" "$stage/source-lock.json"
+cp "$repo_root/third_party/switch-glslang.lock.json" "$stage/host-tool-lock.json"
+cp "$repo_root/.cache/glslang-host-source/LICENSE.txt" "$stage/glslang-LICENSE.txt"
 cp "$source_dir/.pocket-console-submodules.txt" "$stage/submodule-status.txt"
+"$validator" --version > "$stage/glslang-version.txt"
+sha256sum "$validator" > "$stage/host-tool-sha256.txt"
 "$cmake" --version > "$stage/cmake-version.txt"
 "$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" --version > "$stage/clang-version.txt"
 cp "$build_dir/CMakeCache.txt" "$stage/CMakeCache.txt"
@@ -61,6 +72,7 @@ Target: unmodified upstream yuzu-android
 ABI: $abi
 Android API: 33
 Toolchain: NDK 28.2.13676358, CMake 3.31.5, Ninja
+Host shader compiler: Khronos glslang 15.4.0, exact source in host-tool-lock.json
 Configuration: CMakeCache.txt
 Artifact: hokkaido-upstream-probe.so (renamed file only; original ELF SONAME is recorded)
 Status: source/build probe only; no Pocket Console runtime adapter or compatibility claim
@@ -85,7 +97,7 @@ if [[ ! -s "$stage/license-files.txt" ]]; then
   exit 1
 fi
 
-(cd "$stage" && sha256sum hokkaido-upstream-probe.so source-lock.json submodule-status.txt cmake-version.txt clang-version.txt CMakeCache.txt build-manifest.txt shared-libraries.txt shared-library-sha256.txt probe-dynamic-section.txt probe-elf-header.txt licenses.tar.gz license-files.txt > SHA256SUMS)
+(cd "$stage" && sha256sum hokkaido-upstream-probe.so source-lock.json host-tool-lock.json glslang-LICENSE.txt glslang-version.txt host-tool-sha256.txt submodule-status.txt cmake-version.txt clang-version.txt CMakeCache.txt build-manifest.txt shared-libraries.txt shared-library-sha256.txt probe-dynamic-section.txt probe-elf-header.txt licenses.tar.gz license-files.txt > SHA256SUMS)
 mv "$stage" "$output_dir"
 trap - EXIT
 echo "Built upstream source probe: $output_dir/hokkaido-upstream-probe.so"
