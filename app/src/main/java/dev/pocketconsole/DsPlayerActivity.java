@@ -63,7 +63,6 @@ public final class DsPlayerActivity extends Activity {
         super.onCreate(state);
         ui = new ConsoleUi(this);
         PAPER = ui.paper; INK = ui.ink; SHELL = ui.shell; ORANGE = ui.accent;
-        ui.applyBars(this);
         buildUi();
         String uri = getIntent().getStringExtra(EXTRA_ROM_URI);
         if (uri == null) { showStatus("DS 파일 주소가 없어요."); playerDone = true; return; }
@@ -180,6 +179,7 @@ public final class DsPlayerActivity extends Activity {
         page.setPadding(dp(16), dp(8), dp(16), dp(8));
         scroll.addView(page);
         setContentView(scroll);
+        ui.applySystemBars(getWindow());
         scroll.requestApplyInsets();
 
         LinearLayout header = row();

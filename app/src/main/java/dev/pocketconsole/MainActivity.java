@@ -92,7 +92,6 @@ public final class MainActivity extends Activity {
             ConsoleType restored = consoleForId(uiPreferences.getString(KEY_CONSOLE, null));
             if (restored != null) selected = restored;
         }
-        ui.applyBars(this);
         render();
         Context app = getApplicationContext();
         DOCUMENT_IO.execute(() -> {
@@ -283,6 +282,7 @@ public final class MainActivity extends Activity {
         scroll.addView(page);
         root.addView(scroll, new LinearLayout.LayoutParams(-1, -1));
         setContentView(root);
+        ui.applySystemBars(getWindow());
         root.requestApplyInsets();
         if (preview) drawPreview(); else drawLibrary();
     }
