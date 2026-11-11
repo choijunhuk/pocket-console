@@ -12,6 +12,9 @@ local.properties
 # User game files and firmware never belong in source control.
 *.nds
 *.3ds
+*.3dsx
+*.elf
+*.axf
 *.cci
 *.cxi
 *.cia
