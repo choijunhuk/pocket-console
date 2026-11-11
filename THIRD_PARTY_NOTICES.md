@@ -21,3 +21,7 @@ The official Linux libretro binary is used only in CI for host acceptance, with 
 ## Switch and Switch 2 candidates
 
 Eden and Hokkaido are research candidates, not bundled backends in this revision. Hokkaido's narrow maintainer-reported Switch 2 results do not establish Galaxy S23 Ultra or broad Android compatibility. Keep engine readiness separate from device prerequisites and catalog classification.
+
+## Khronos host-test headers
+
+Linux host tests download exact Khronos EGL/OpenGL registry headers listed in `third_party/host-graphics.lock.json`. Every header is checked by SHA-256 and retains its original copyright and license notice. These development headers are not bundled in the Android APK. Rendering still uses the runner's installed Mesa libraries; no replacement renderer or synthetic frames are supplied.

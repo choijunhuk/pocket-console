@@ -14,11 +14,12 @@ esac
 include="${LIBRETRO_INCLUDE:-$PWD/third_party/melonDS/src/libretro/libretro-common/include}"
 test -f "$include/libretro.h" || { echo "libretro.h absent at $include" >&2; exit 2; }
 build="$PWD/.cache/three_ds-native"
+python3 scripts/prepare-host-graphics.py
 mkdir -p "$build/runtime"
 "${CXX:-c++}" -std=c++17 -O2 -Wall -Wextra -Werror \
-    -Iapp/src/main/cpp/three_ds -I"$include" \
+    -I.cache/host-graphics/include -Iapp/src/main/cpp/three_ds -I"$include" \
     tests/three_ds/smoke.cpp app/src/main/cpp/three_ds/ThreeDsEngine.cpp \
-    -lEGL -lGL -ldl -pthread -o "$build/smoke"
+    -l:libEGL.so.1 -l:libGL.so.1 -ldl -pthread -o "$build/smoke"
 
 core_dir="$(cd "$(dirname "$core")" && pwd)"
 rom_path="$(cd "$(dirname "$rom")" && pwd)/$(basename "$rom")"

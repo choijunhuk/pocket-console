@@ -8,8 +8,7 @@
 #include <GLES3/gl32.h>
 #else
 #define GL_GLEXT_PROTOTYPES
-#include <GL/gl.h>
-#include <GL/glext.h>
+#include <GL/glcorearb.h>
 #endif
 
 #include <algorithm>
