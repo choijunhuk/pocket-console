@@ -9,13 +9,13 @@ public final class ConsoleTypeTest {
         for (String suffix : new String[]{"nro", "nsp", "xci"}) expect(ConsoleType.SWITCH, "game." + suffix);
         expect(ConsoleType.DS, "모험.NDS");
         expect(ConsoleType.THREE_DS, "GAME.CXI");
-        for (String suffix : new String[]{"nsp", "xci", "NSP", "XCI"}) {
+        for (String suffix : new String[]{"nro", "nsp", "xci", "NRO", "NSP", "XCI"}) {
             expectImport(ConsoleType.SWITCH_TWO, "game." + suffix, ConsoleType.SWITCH_TWO);
             expectImport(ConsoleType.SWITCH, "game." + suffix, ConsoleType.SWITCH);
             expectImport(ConsoleType.SWITCH, "game." + suffix, null);
         }
         expectImport(ConsoleType.DS, "game.nds", ConsoleType.SWITCH_TWO);
-        expectImport(ConsoleType.SWITCH, "game.nro", ConsoleType.SWITCH_TWO);
+        expectImport(ConsoleType.SWITCH_TWO, "game.nro", ConsoleType.SWITCH_TWO);
         expectImport(null, "game.zip", ConsoleType.SWITCH_TWO);
         expectImport(null, null, ConsoleType.SWITCH_TWO);
         for (String name : new String[]{null, "", ".nds", "firmware.bin", "prod.keys", "game.zip", "game.nds.exe", "game", "installer.cia"}) expect(null, name);
