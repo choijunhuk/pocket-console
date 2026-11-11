@@ -71,9 +71,10 @@ class ProjectHookTests(unittest.TestCase):
             )
             (root / "src/common/common.cpp").write_text("void common_code() {}\n")
             (root / "src/android/app/src/main/jni/native.cpp").write_text(
-                "struct EmulationSession {};\n"
+                "struct EmulationSession { int System() { return 0; } };\n"
                 "static EmulationSession s_instance;\n"
                 "EmulationSession& getInstance() { return s_instance; }\n"
+                "void multiplayer() { s_instance.System(); }\n"
             )
             (root / "src/android/app/src/main/jni/CMakeLists.txt").write_text(
                 "add_library(yuzu-android SHARED native.cpp)\n"
@@ -110,7 +111,9 @@ class ProjectHookTests(unittest.TestCase):
             self.assertIn(HOOK.parent / "software_keyboard.cpp", compiled)
             generated = (build / "pocket-switch-sdk/native.cpp").read_text()
             self.assertIn("static EmulationSession s_instance; return s_instance;", generated)
+            self.assertIn("EmulationSession::GetInstance().System()", generated)
             self.assertNotIn("static EmulationSession s_instance;\n", generated)
+            self.assertNotIn("s_instance.System()", generated)
 
     def test_unreviewed_native_target_stops_before_toolchain_setup(self):
         script = HOOK.parents[2] / "scripts/build-switch-probe.sh"
