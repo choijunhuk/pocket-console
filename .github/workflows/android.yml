@@ -29,6 +29,12 @@ jobs:
         run: ./scripts/test-model.sh
       - name: Build and lint
         run: ./gradlew --no-daemon lintDebug assembleDebug
+      - name: Verify debug APK
+        run: |
+          apk=app/build/outputs/apk/debug/app-debug.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$apk"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk"
+          sha256sum "$apk" | tee app/build/outputs/apk/debug/app-debug.apk.sha256
       - name: Explain lint failures
         if: failure()
         run: |
@@ -41,6 +47,7 @@ jobs:
           name: pocket-console-debug
           path: |
             app/build/outputs/apk/debug/*.apk
+            app/build/outputs/apk/debug/*.sha256
             app/build/reports/tests/
             app/build/reports/lint-results-debug.html
           if-no-files-found: warn
