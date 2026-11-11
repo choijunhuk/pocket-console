@@ -9,11 +9,28 @@ permissions:
   contents: read
 
 jobs:
-  verify:
+  native-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Run real DS core smoke
+        run: ./scripts/test-native.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ds-core-smoke
+          path: .cache/native-smoke/*.ppm
+          if-no-files-found: warn
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -23,17 +40,20 @@ jobs:
           packages: platform-tools
           log-accepted-android-sdk-licenses: false
       - name: Install Android SDK
-        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.1.12297006'
       - uses: gradle/actions/setup-gradle@v4
       - name: Check file classification
         run: ./scripts/test-model.sh
+      - name: Generate original homebrew test asset
+        run: python3 tests/native/make_smoke_nds.py app/src/androidTest/assets/smoke.nds
       - name: Build and lint
-        run: ./gradlew --no-daemon lintDebug assembleDebug
+        run: ./gradlew --no-daemon lintDebug assembleDebug assembleDebugAndroidTest
       - name: Verify debug APK
         run: |
           apk=app/build/outputs/apk/debug/app-debug.apk
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$apk"
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk"
+          unzip -l "$apk" | grep -E 'lib/(arm64-v8a|x86_64)/lib(pocket_ds|retro|c\+\+_shared)\.so'
           sha256sum "$apk" | tee app/build/outputs/apk/debug/app-debug.apk.sha256
       - name: Explain lint failures
         if: failure()
@@ -48,6 +68,40 @@ jobs:
           path: |
             app/build/outputs/apk/debug/*.apk
             app/build/outputs/apk/debug/*.sha256
+            app/build/outputs/apk/androidTest/debug/*.apk
             app/build/reports/tests/
             app/build/reports/lint-results-debug.html
+          if-no-files-found: warn
+  android-native-smoke:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: pocket-console-debug
+          path: artifacts
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect
+          script: |
+            adb install artifacts/outputs/apk/debug/app-debug.apk
+            adb install artifacts/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            adb shell am instrument -w -r dev.pocketconsole.test/dev.pocketconsole.DsSmokeInstrumentation | tee android-native-smoke.log
+            grep 'DS_ANDROID_SMOKE_PASS' android-native-smoke.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-native-smoke
+          path: android-native-smoke.log
           if-no-files-found: warn

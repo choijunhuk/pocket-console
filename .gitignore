@@ -2,6 +2,7 @@
 .cache/
 .idea/
 **/build/
+**/.cxx/
 local.properties
 *.iml
 *.jks
@@ -20,3 +21,5 @@ local.properties
 *.keys
 *.bin
 *.sav
+*.apk
+*.so

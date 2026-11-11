@@ -7,6 +7,10 @@
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
         <activity
+            android:name=".DsPlayerActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize" />
+        <activity
             android:name=".MainActivity"
             android:exported="true">
             <intent-filter>

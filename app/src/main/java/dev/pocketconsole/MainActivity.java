@@ -269,7 +269,9 @@ public final class MainActivity extends Activity {
         gap(hero, 10);
         hero.addView(text(selected.subtitle, 18, INK, true));
         gap(hero, 8);
-        hero.addView(text("화면과 버튼 반응을 살펴보세요. 게임 실행 기능은 아직 없습니다.", 13, QUIET, false));
+        hero.addView(text(selected == ConsoleType.DS
+                ? "DS 파일을 누르면 게임을 실행할 수 있어요. 이 화면은 조작 미리보기예요."
+                : "화면과 버튼 반응을 살펴보세요. 게임 실행 기능은 아직 없습니다.", 13, QUIET, false));
         gap(hero, 16);
         ConsolePreviewView art = new ConsolePreviewView(this, selected);
         hero.addView(art, new LinearLayout.LayoutParams(-1, dp(190)));
@@ -310,14 +312,17 @@ public final class MainActivity extends Activity {
         page.addView(importButton, new LinearLayout.LayoutParams(-1, dp(54)));
         importButton.setOnClickListener(v -> importFile());
         gap(page, 14);
-        page.addView(text("코어 연결 예정  ·  파일은 기기에 그대로 보관됩니다.", 12, QUIET, false));
+        page.addView(text(selected == ConsoleType.DS
+                ? "DS 게임 실행 가능  ·  원본 파일은 기기에 그대로 보관됩니다."
+                : "코어 연결 예정  ·  파일은 기기에 그대로 보관됩니다.", 12, QUIET, false));
     }
 
     private void drawEntry(LibraryStore.Entry entry) {
         Button item = button("▣    " + entry.name + "     ›", Color.WHITE, INK);
         item.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
         item.setPadding(dp(16), 0, dp(16), 0);
-        item.setContentDescription(entry.name + ", " + entry.console.label + " 파일, 코어 연결 예정");
+        item.setContentDescription(entry.name + ", " + entry.console.label + " 파일, "
+                + (entry.console == ConsoleType.DS ? "게임 실행" : "코어 연결 예정"));
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(60));
         params.bottomMargin = dp(8);
         page.addView(item, params);
@@ -373,7 +378,9 @@ public final class MainActivity extends Activity {
             resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
             boolean added = new LibraryStore(app).add(name, uri.toString(), type);
             app.getSharedPreferences(UI_PREFS, MODE_PRIVATE).edit().putString(KEY_CONSOLE, type.id).commit();
-            return new ImportResult(type, added ? "파일을 목록에 추가했어요. 실행은 코어 연결 후 가능해요." : "이미 가져온 파일이에요.");
+            return new ImportResult(type, added ? (type == ConsoleType.DS
+                    ? "DS 파일을 목록에 추가했어요. 파일을 눌러 실행하세요."
+                    : "파일을 목록에 추가했어요. 실행은 코어 연결 후 가능해요.") : "이미 가져온 파일이에요.");
         } catch (IllegalStateException e) {
             return new ImportResult(null, "파일 목록을 저장할 수 없어요. 다시 시도해 주세요.");
         } catch (Exception e) {
@@ -392,6 +399,12 @@ public final class MainActivity extends Activity {
     }
 
     private void openEntry(LibraryStore.Entry entry) {
+        if (entry.console == ConsoleType.DS) {
+            Intent player = new Intent(this, DsPlayerActivity.class);
+            player.putExtra(DsPlayerActivity.EXTRA_ROM_URI, entry.uri);
+            startActivity(player);
+            return;
+        }
         Context app = getApplicationContext();
         WeakReference<MainActivity> target = new WeakReference<>(this);
         showNotice("파일 접근을 확인하고 있어요…");

@@ -5,13 +5,23 @@ plugins {
 android {
     namespace = "dev.pocketconsole"
     compileSdk = 36
+    ndkVersion = "27.1.12297006"
 
     defaultConfig {
         applicationId = "dev.pocketconsole"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0-preview"
+        versionCode = 2
+        versionName = "0.2.0-ds-alpha"
+        testInstrumentationRunner = "dev.pocketconsole.DsSmokeInstrumentation"
+        ndk {
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
+        externalNativeBuild {
+            ndkBuild {
+                arguments += "NDK_APPLICATION_MK=${file("src/main/cpp/Application.mk")}"
+            }
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -19,5 +29,10 @@ android {
     }
     lint {
         abortOnError = true
+    }
+    externalNativeBuild {
+        ndkBuild {
+            path = file("src/main/cpp/Android.mk")
+        }
     }
 }
