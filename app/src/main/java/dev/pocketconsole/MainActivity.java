@@ -126,6 +126,8 @@ public final class MainActivity extends Activity {
         super.onSaveInstanceState(out);
     }
 
+    // API 33+ uses BackApi33; this override exists only for older Android versions.
+    @android.annotation.SuppressLint("GestureBackNavigation")
     @Override public void onBackPressed() {
         if (Build.VERSION.SDK_INT >= 33) { super.onBackPressed(); return; }
         if (preview) { preview = false; render(); }

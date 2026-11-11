@@ -29,6 +29,11 @@ jobs:
         run: ./scripts/test-model.sh
       - name: Build and lint
         run: ./gradlew --no-daemon lintDebug assembleDebug
+      - name: Explain lint failures
+        if: failure()
+        run: |
+          report=app/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/lint-results-debug.txt
+          if [ -f "$report" ]; then cat "$report"; fi
       - name: Upload debug APK and reports
         if: always()
         uses: actions/upload-artifact@v4
