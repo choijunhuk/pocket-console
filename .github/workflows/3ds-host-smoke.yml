@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   smoke:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -18,7 +18,11 @@ jobs:
       - name: Install software graphics support
         run: |
           if ! pkg-config --exists egl gl glesv2; then
-            sudo timeout 240 apt-get -o DPkg::Lock::Timeout=60 -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends libegl1-mesa-dev libgl1-mesa-dev libgles2-mesa-dev libgl1-mesa-dri
+            for source in /etc/apt/apt-mirrors.txt /etc/apt/apt-mirrors-security.txt /etc/apt/sources.list.d/ubuntu.sources; do
+              if [ -f "$source" ]; then sudo sed -i -e 's|http://|https://|g' -e 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' "$source"; fi
+            done
+            sudo timeout 180 apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 update
+            sudo timeout 240 apt-get -o DPkg::Lock::Timeout=60 -o Acquire::Retries=1 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 install -y --no-install-recommends libegl1-mesa-dev libgl1-mesa-dev libgles2-mesa-dev libgl1-mesa-dri
           fi
           pkg-config --modversion egl gl glesv2
       - name: Build original 3DS homebrew
