@@ -19,10 +19,10 @@ mkdir -p "$build/runtime"
 "${CXX:-c++}" -std=c++17 -O2 -Wall -Wextra -Werror \
     -I.cache/host-graphics/include -Iapp/src/main/cpp/three_ds -I"$include" \
     tests/three_ds/smoke.cpp app/src/main/cpp/three_ds/ThreeDsEngine.cpp \
-    -l:libEGL.so.1 -l:libGL.so.1 -ldl -pthread -o "$build/smoke"
+    -l:libGL.so.1 -l:libX11.so.6 -ldl -pthread -o "$build/smoke"
 
 core_dir="$(cd "$(dirname "$core")" && pwd)"
 rom_path="$(cd "$(dirname "$rom")" && pwd)/$(basename "$rom")"
-EGL_PLATFORM=surfaceless LIBGL_ALWAYS_SOFTWARE=1 \
+LIBGL_ALWAYS_SOFTWARE=1 \
     LD_LIBRARY_PATH="$core_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-    "$build/smoke" "$rom_path" "$build/runtime"
+    xvfb-run -a "$build/smoke" "$rom_path" "$build/runtime"

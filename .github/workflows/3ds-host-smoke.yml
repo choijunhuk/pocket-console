@@ -20,9 +20,11 @@ jobs:
           path: tests/three_ds
       - name: Verify installed software graphics runtime
         run: |
-          dpkg-query -W libegl1 libgl1 libgl1-mesa-dri
-          ldconfig -p | grep -F libEGL.so.1
+          dpkg-query -W libgl1 libgl1-mesa-dri libx11-6 xvfb
           ldconfig -p | grep -F libGL.so.1
+          ldconfig -p | grep -F libX11.so.6
+          ldconfig -p | grep -E 'libGLX|libGLdispatch' || true
+          command -v xvfb-run
           test -r /usr/lib/x86_64-linux-gnu/dri/swrast_dri.so
       - name: Verify official host test core
         run: |

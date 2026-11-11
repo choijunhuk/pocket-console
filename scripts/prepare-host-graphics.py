@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch exact Khronos headers for the Linux host smoke build."""
+"""Fetch exact Khronos OpenGL headers for the Linux host smoke build."""
 
 from hashlib import sha256
 import json
@@ -15,8 +15,7 @@ OUTPUT = ROOT / ".cache/host-graphics/include"
 PINNED = {
     "KhronosGroup/EGL-Registry": (
         "8e56e86e65687697ef54114cdb1afabdfac756bf",
-        {"api/EGL/egl.h", "api/EGL/eglext.h", "api/EGL/eglplatform.h",
-         "api/KHR/khrplatform.h"},
+        {"api/KHR/khrplatform.h"},
     ),
     "KhronosGroup/OpenGL-Registry": (
         "6af574a14089ccfee87efe230ebcdd8742859813",

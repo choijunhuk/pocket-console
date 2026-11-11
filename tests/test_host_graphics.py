@@ -19,9 +19,8 @@ spec.loader.exec_module(graphics)
 class HostGraphicsTest(unittest.TestCase):
     def test_reviewed_lock_uses_exact_official_pins(self):
         entries = graphics.load_specs()
-        self.assertEqual(len(entries), 5)
+        self.assertEqual(len(entries), 2)
         self.assertEqual({name for name, _, _ in entries}, {
-            "EGL/egl.h", "EGL/eglext.h", "EGL/eglplatform.h",
             "KHR/khrplatform.h", "GL/glcorearb.h"})
         self.assertTrue(all(url.startswith("https://raw.githubusercontent.com/KhronosGroup/")
                             for _, _, url in entries))
@@ -35,7 +34,7 @@ class HostGraphicsTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "commit"):
                 graphics.load_specs(path)
             lock["sources"][0]["commit"] = graphics.PINNED["KhronosGroup/EGL-Registry"][0]
-            lock["sources"][0]["files"][0]["path"] = "api/EGL/../../outside.h"
+            lock["sources"][0]["files"][0]["path"] = "api/KHR/../../outside.h"
             path.write_text(json.dumps(lock))
             with self.assertRaisesRegex(ValueError, "paths"):
                 graphics.load_specs(path)
@@ -43,7 +42,7 @@ class HostGraphicsTest(unittest.TestCase):
     def test_verify_all_before_publish_reuse_and_repair(self):
         first = b"official header one\n"
         second = b"official header two\n"
-        specs = [("EGL/egl.h", sha256(first).hexdigest(), "first"),
+        specs = [("KHR/khrplatform.h", sha256(first).hexdigest(), "first"),
                  ("GL/glcorearb.h", sha256(second).hexdigest(), "second")]
         payload = {"first": first, "second": second}
         calls = []
@@ -63,9 +62,9 @@ class HostGraphicsTest(unittest.TestCase):
             calls.clear()
             self.assertEqual(graphics.prepare(output, specs, fetch), "reused")
             self.assertEqual(calls, [])
-            (output / "EGL/egl.h").write_bytes(b"corrupted")
+            (output / "KHR/khrplatform.h").write_bytes(b"corrupted")
             self.assertEqual(graphics.prepare(output, specs, fetch), "prepared")
-            self.assertEqual((output / "EGL/egl.h").read_bytes(), first)
+            self.assertEqual((output / "KHR/khrplatform.h").read_bytes(), first)
 
 
 if __name__ == "__main__":

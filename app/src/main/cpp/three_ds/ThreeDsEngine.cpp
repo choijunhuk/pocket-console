@@ -2,13 +2,51 @@
 
 #include <libretro.h>
 
+#ifdef __ANDROID__
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
-#ifdef __ANDROID__
 #include <GLES3/gl32.h>
 #else
 #define GL_GLEXT_PROTOTYPES
 #include <GL/glcorearb.h>
+
+struct _XDisplay;
+struct __GLXFBConfigRec;
+struct __GLXcontextRec;
+using XDisplay = _XDisplay;
+using GLXFBConfig = __GLXFBConfigRec*;
+using GLXContext = __GLXcontextRec*;
+using GLXPbuffer = unsigned long;
+using GLXProc = void (*)();
+struct XErrorEvent {
+    int type;
+    XDisplay* display;
+    unsigned long resourceid;
+    unsigned long serial;
+    unsigned char error_code;
+    unsigned char request_code;
+    unsigned char minor_code;
+};
+using XErrorHandler = int (*)(XDisplay*, XErrorEvent*);
+
+extern "C" {
+XDisplay* XOpenDisplay(const char*);
+int XDefaultScreen(XDisplay*);
+int XCloseDisplay(XDisplay*);
+int XFree(void*);
+int XSync(XDisplay*, int);
+int XGetErrorText(XDisplay*, int, char*, int);
+XErrorHandler XSetErrorHandler(XErrorHandler);
+int glXQueryVersion(XDisplay*, int*, int*);
+const char* glXQueryExtensionsString(XDisplay*, int);
+GLXFBConfig* glXChooseFBConfig(XDisplay*, int, const int*, int*);
+GLXPbuffer glXCreatePbuffer(XDisplay*, GLXFBConfig, const int*);
+void glXDestroyPbuffer(XDisplay*, GLXPbuffer);
+GLXContext glXGetCurrentContext();
+int glXMakeContextCurrent(XDisplay*, GLXPbuffer, GLXPbuffer, GLXContext);
+void glXDestroyContext(XDisplay*, GLXContext);
+GLXProc glXGetProcAddressARB(const unsigned char*);
+}
 #endif
 
 #include <algorithm>
@@ -24,6 +62,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <sys/stat.h>
 #include <thread>
 #include <vector>
@@ -75,9 +114,15 @@ struct Session {
     int circleX = 0;
     int circleY = 0;
     int metrics[4]{};
+#ifdef __ANDROID__
     EGLDisplay display = EGL_NO_DISPLAY;
     EGLSurface surface = EGL_NO_SURFACE;
     EGLContext context = EGL_NO_CONTEXT;
+#else
+    XDisplay* display = nullptr;
+    GLXPbuffer surface = 0;
+    GLXContext context = nullptr;
+#endif
     GLuint framebuffer = 0;
     GLuint color = 0;
     GLuint depthStencil = 0;
@@ -96,6 +141,80 @@ std::mutex g_mutex;
 std::unique_ptr<Session> g_session;
 Output* g_output = nullptr;
 uint64_t g_nextToken = 0;
+
+#ifndef __ANDROID__
+constexpr int kGlxDrawableType = 0x8010;
+constexpr int kGlxPbufferBit = 0x0004;
+constexpr int kGlxRenderType = 0x8011;
+constexpr int kGlxRgbaBit = 0x0001;
+constexpr int kGlxPbufferWidth = 0x8041;
+constexpr int kGlxPbufferHeight = 0x8040;
+constexpr int kGlxContextMajor = 0x2091;
+constexpr int kGlxContextMinor = 0x2092;
+constexpr int kGlxContextProfile = 0x9126;
+constexpr int kGlxCoreProfile = 0x0001;
+
+struct XErrorState {
+    unsigned code = 0;
+    unsigned request = 0;
+    unsigned minor = 0;
+};
+thread_local XErrorState g_xError;
+
+int recordXError(XDisplay*, XErrorEvent* event) {
+    g_xError = {event->error_code, event->request_code, event->minor_code};
+    return 0;
+}
+
+class XErrorTrap {
+public:
+    explicit XErrorTrap(XDisplay* display)
+        : display_(display), previous_(XSetErrorHandler(recordXError)) {
+        g_xError = {};
+    }
+    ~XErrorTrap() { if (active_) finish(); }
+    XErrorState finish() {
+        XSync(display_, 0);
+        XSetErrorHandler(previous_);
+        active_ = false;
+        return g_xError;
+    }
+
+private:
+    XDisplay* display_;
+    XErrorHandler previous_;
+    bool active_ = true;
+};
+
+std::string xFailure(XDisplay* display, const char* action, XErrorState error) {
+    if (!error.code) return std::string(action) + " failed";
+    char detail[128] = {};
+    XGetErrorText(display, error.code, detail, sizeof(detail));
+    return std::string(action) + " failed (X11 " + detail + ", request " +
+           std::to_string(error.request) + "." + std::to_string(error.minor) + ")";
+}
+
+bool hasExtension(std::string_view list, std::string_view name) {
+    size_t position = list.find(name);
+    while (position != std::string_view::npos) {
+        const size_t end = position + name.size();
+        if ((position == 0 || list[position - 1] == ' ') &&
+            (end == list.size() || list[end] == ' ')) return true;
+        position = list.find(name, end);
+    }
+    return false;
+}
+
+void makeCurrent(Session& session) {
+    if (glXGetCurrentContext() == session.context) return;
+    XErrorTrap trap(session.display);
+    const int success = glXMakeContextCurrent(session.display, session.surface, session.surface,
+                                              session.context);
+    const XErrorState error = trap.finish();
+    if (!success || error.code)
+        throw std::runtime_error(xFailure(session.display, "3DS GLX make-current", error));
+}
+#endif
 
 template <typename T>
 T symbol(void* library, const char* name) {
@@ -268,7 +387,11 @@ bool environment(unsigned command, void* data) {
 #endif
             callback->get_current_framebuffer = []() -> uintptr_t { return g_session->framebuffer; };
             callback->get_proc_address = [](const char* name) -> retro_proc_address_t {
+#ifdef __ANDROID__
                 auto address = eglGetProcAddress(name);
+#else
+                auto address = glXGetProcAddressARB(reinterpret_cast<const unsigned char*>(name));
+#endif
                 if (!address) address = reinterpret_cast<decltype(address)>(dlsym(RTLD_DEFAULT, name));
                 return reinterpret_cast<retro_proc_address_t>(address);
             };
@@ -292,11 +415,13 @@ bool environment(unsigned command, void* data) {
     }
 }
 
+#ifdef __ANDROID__
 std::string eglFailure(const char* message) {
     char error[16];
     std::snprintf(error, sizeof(error), "0x%04x", eglGetError());
     return std::string(message) + " (EGL " + error + ")";
 }
+#endif
 
 std::string observedVersion(GLint major, GLint minor) {
     const auto* version = glGetString(GL_VERSION);
@@ -305,18 +430,13 @@ std::string observedVersion(GLint major, GLint minor) {
 }
 
 void createGraphics(Session& session) {
+#ifdef __ANDROID__
     session.display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
     if (session.display == EGL_NO_DISPLAY || !eglInitialize(session.display, nullptr, nullptr))
         throw std::runtime_error(eglFailure("3DS EGL display is unavailable"));
-#ifdef __ANDROID__
     if (!eglBindAPI(EGL_OPENGL_ES_API))
         throw std::runtime_error(eglFailure("3DS OpenGL ES is unavailable"));
     constexpr EGLint renderable = EGL_OPENGL_ES3_BIT_KHR;
-#else
-    if (!eglBindAPI(EGL_OPENGL_API))
-        throw std::runtime_error(eglFailure("3DS OpenGL is unavailable"));
-    constexpr EGLint renderable = EGL_OPENGL_BIT;
-#endif
     const EGLint attributes[] = {EGL_SURFACE_TYPE, EGL_PBUFFER_BIT, EGL_RENDERABLE_TYPE, renderable,
                                  EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8,
                                  EGL_ALPHA_SIZE, 8, EGL_NONE};
@@ -328,18 +448,65 @@ void createGraphics(Session& session) {
     session.surface = eglCreatePbufferSurface(session.display, config, pbuffer);
     if (session.surface == EGL_NO_SURFACE)
         throw std::runtime_error(eglFailure("3DS EGL surface failed"));
-#ifdef __ANDROID__
     const EGLint context[] = {EGL_CONTEXT_MAJOR_VERSION_KHR, 3, EGL_CONTEXT_MINOR_VERSION_KHR, 2,
                               EGL_NONE};
-#else
-    const EGLint context[] = {EGL_CONTEXT_MAJOR_VERSION_KHR, 4, EGL_CONTEXT_MINOR_VERSION_KHR, 3,
-                              EGL_CONTEXT_OPENGL_PROFILE_MASK_KHR,
-                              EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT_KHR, EGL_NONE};
-#endif
     session.context = eglCreateContext(session.display, config, EGL_NO_CONTEXT, context);
     if (session.context == EGL_NO_CONTEXT ||
         !eglMakeCurrent(session.display, session.surface, session.surface, session.context))
         throw std::runtime_error(eglFailure("3DS graphics context failed"));
+#else
+    session.display = XOpenDisplay(nullptr);
+    if (!session.display) throw std::runtime_error("3DS X11 display is unavailable");
+    const int screen = XDefaultScreen(session.display);
+    int glxMajor = 0, glxMinor = 0;
+    XErrorTrap versionTrap(session.display);
+    const int versionOkay = glXQueryVersion(session.display, &glxMajor, &glxMinor);
+    const XErrorState versionError = versionTrap.finish();
+    if (!versionOkay || versionError.code)
+        throw std::runtime_error(xFailure(session.display, "3DS GLX 1.4", versionError));
+    if (glxMajor < 1 || (glxMajor == 1 && glxMinor < 4))
+        throw std::runtime_error("3DS GLX 1.4 is required; found " +
+                                 std::to_string(glxMajor) + "." + std::to_string(glxMinor));
+    XErrorTrap extensionTrap(session.display);
+    const char* extensions = glXQueryExtensionsString(session.display, screen);
+    const XErrorState extensionError = extensionTrap.finish();
+    if (extensionError.code)
+        throw std::runtime_error(xFailure(session.display, "3DS GLX extensions", extensionError));
+    if (!extensions || !hasExtension(extensions, "GLX_ARB_create_context") ||
+        !hasExtension(extensions, "GLX_ARB_create_context_profile"))
+        throw std::runtime_error("3DS GLX core-context extension is unavailable");
+    const int attributes[] = {kGlxDrawableType, kGlxPbufferBit,
+                              kGlxRenderType, kGlxRgbaBit, 0};
+    int count = 0;
+    XErrorTrap configTrap(session.display);
+    GLXFBConfig* configs = glXChooseFBConfig(session.display, screen, attributes, &count);
+    const XErrorState configError = configTrap.finish();
+    if (configError.code || !configs || count < 1) {
+        if (configs) XFree(configs);
+        throw std::runtime_error(xFailure(session.display, "3DS GLX framebuffer config", configError));
+    }
+    const GLXFBConfig chosen = configs[0];
+    XFree(configs);
+    const int pbuffer[] = {kGlxPbufferWidth, static_cast<int>(kWidth),
+                           kGlxPbufferHeight, static_cast<int>(kHeight), 0};
+    XErrorTrap surfaceTrap(session.display);
+    session.surface = glXCreatePbuffer(session.display, chosen, pbuffer);
+    const XErrorState surfaceError = surfaceTrap.finish();
+    if (!session.surface || surfaceError.code)
+        throw std::runtime_error(xFailure(session.display, "3DS GLX pbuffer", surfaceError));
+    using CreateContext = GLXContext (*)(XDisplay*, GLXFBConfig, GLXContext, int, const int*);
+    const auto createContext = reinterpret_cast<CreateContext>(
+        glXGetProcAddressARB(reinterpret_cast<const unsigned char*>("glXCreateContextAttribsARB")));
+    if (!createContext) throw std::runtime_error("3DS GLX context creation is unavailable");
+    const int context[] = {kGlxContextMajor, 4, kGlxContextMinor, 3,
+                           kGlxContextProfile, kGlxCoreProfile, 0};
+    XErrorTrap contextTrap(session.display);
+    session.context = createContext(session.display, chosen, nullptr, 1, context);
+    const XErrorState contextError = contextTrap.finish();
+    if (!session.context || contextError.code)
+        throw std::runtime_error(xFailure(session.display, "3DS OpenGL 4.3 core context", contextError));
+    makeCurrent(session);
+#endif
     GLint major = 0, minor = 0;
     glGetIntegerv(GL_MAJOR_VERSION, &major);
     glGetIntegerv(GL_MINOR_VERSION, &minor);
@@ -373,6 +540,7 @@ void createGraphics(Session& session) {
 }
 
 void destroyGraphics(Session& session) {
+#ifdef __ANDROID__
     if (session.display == EGL_NO_DISPLAY) return;
     if (session.context != EGL_NO_CONTEXT && session.surface != EGL_NO_SURFACE)
         eglMakeCurrent(session.display, session.surface, session.surface, session.context);
@@ -383,6 +551,31 @@ void destroyGraphics(Session& session) {
     if (session.context != EGL_NO_CONTEXT) eglDestroyContext(session.display, session.context);
     if (session.surface != EGL_NO_SURFACE) eglDestroySurface(session.display, session.surface);
     eglTerminate(session.display);
+#else
+    if (!session.display) return;
+    bool current = false;
+    if (session.context && session.surface) {
+        try {
+            makeCurrent(session);
+            current = true;
+        } catch (const std::exception& error) {
+            std::fprintf(stderr, "%s\n", error.what());
+        }
+    }
+    if (current) {
+        if (session.depthStencil) glDeleteRenderbuffers(1, &session.depthStencil);
+        if (session.color) glDeleteTextures(1, &session.color);
+        if (session.framebuffer) glDeleteFramebuffers(1, &session.framebuffer);
+    }
+    XErrorTrap cleanupTrap(session.display);
+    glXMakeContextCurrent(session.display, 0, 0, nullptr);
+    if (session.context) glXDestroyContext(session.display, session.context);
+    if (session.surface) glXDestroyPbuffer(session.display, session.surface);
+    const XErrorState cleanupError = cleanupTrap.finish();
+    if (cleanupError.code)
+        std::fprintf(stderr, "%s\n", xFailure(session.display, "3DS GLX cleanup", cleanupError).c_str());
+    XCloseDisplay(session.display);
+#endif
 }
 
 void readVideo(bool diagnose, unsigned ordinal) {
@@ -617,8 +810,12 @@ int frame(uint64_t token, int buttons, int touchX, int touchY, bool down, int ci
     requireOwner(session);
     if (!pixels || !pcm || pixelCapacity < kPixels || audioCapacity < kAudioShorts)
         throw std::runtime_error("3DS output buffer is too small");
+#ifdef __ANDROID__
     if (!eglMakeCurrent(session.display, session.surface, session.surface, session.context))
         throw std::runtime_error(eglFailure("3DS graphics context was lost"));
+#else
+    makeCurrent(session);
+#endif
     session.buttons = buttons & 0xfff;
     session.touchX = touchX;
     session.touchY = touchY;

@@ -16,7 +16,7 @@ Updated 2026-11-12. Source builds, emulator UI, and physical-device game compati
 
 The Android harness records insufficient GLES as `THREEDS_ANDROID_SMOKE_NOT_RUN_GLES`, never a 3DS pass. Missing capability data is an error. UI/DS checks can pass independently; Android 3DS release acceptance still requires a suitable physical device.
 
-The emulator graphics limit and Azahar requirement are documented by [Android](https://developer.android.com/studio/run/emulator-extended-controls) and the [pinned Azahar README](https://github.com/azahar-emu/azahar/blob/219d743a1e698101fe1ab8bef43e6563126c3c27/README.md). The host test uses exact, checksum-verified Khronos headers and the runner's real Mesa EGL/GL libraries. Package mirrors and Canonical's snapshot service failed DNS resolution; the headers do not replace the renderer.
+The emulator graphics limit and Azahar requirement are documented by [Android](https://developer.android.com/studio/run/emulator-extended-controls) and the [pinned Azahar README](https://github.com/azahar-emu/azahar/blob/219d743a1e698101fe1ab8bef43e6563126c3c27/README.md). The Linux host test now uses exact, checksum-verified Khronos GL/platform headers and the runner's Mesa GLX libraries under Xvfb. The runner lacks EGL, and package mirrors and Canonical's snapshot service failed DNS resolution. The Android EGL/GLES path remains separate; the shared framebuffer and actual-output assertions are unchanged. Linux linked runtime acceptance is still pending.
 
 ## Rendered evidence
 
