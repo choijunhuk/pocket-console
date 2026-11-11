@@ -16,7 +16,11 @@ jobs:
         with:
           submodules: recursive
       - name: Install software graphics support
-        run: sudo apt-get update && sudo apt-get install -y libegl1-mesa-dev libgl1-mesa-dev libgles2-mesa-dev libgl1-mesa-dri
+        run: |
+          if ! pkg-config --exists egl gl glesv2; then
+            sudo timeout 240 apt-get -o DPkg::Lock::Timeout=60 -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends libegl1-mesa-dev libgl1-mesa-dev libgles2-mesa-dev libgl1-mesa-dri
+          fi
+          pkg-config --modversion egl gl glesv2
       - name: Build original 3DS homebrew
         run: ./scripts/build-3ds-homebrew.sh
       - name: Verify official host test core
@@ -27,7 +31,7 @@ jobs:
           unzip -p .cache/three_ds-core/core.zip '*azahar_libretro.so' > .cache/three_ds-core/libazahar_libretro.so
           test -s .cache/three_ds-core/libazahar_libretro.so
       - name: Run actual 3DS core
-        run: timeout 180 ./scripts/test-3ds-native.sh tests/three_ds/smoke.3dsx .cache/three_ds-core/libazahar_libretro.so
+        run: timeout --kill-after=10 180 ./scripts/test-3ds-native.sh tests/three_ds/smoke.3dsx .cache/three_ds-core/libazahar_libretro.so
       - uses: actions/upload-artifact@v4
         if: always()
         with:
