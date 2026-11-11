@@ -1,0 +1,22 @@
+.gradle/
+.cache/
+.idea/
+**/build/
+local.properties
+*.iml
+*.jks
+*.keystore
+.omx/
+.superpowers/
+# User game files and firmware never belong in source control.
+*.nds
+*.3ds
+*.cci
+*.cxi
+*.cia
+*.nsp
+*.xci
+*.nro
+*.keys
+*.bin
+*.sav

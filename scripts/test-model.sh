@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+cd "$(dirname "$0")/.."
+mkdir -p .cache/model-tests
+javac -encoding UTF-8 -d .cache/model-tests \
+    app/src/main/java/dev/pocketconsole/ConsoleType.java \
+    tests/ConsoleTypeTest.java
+java -cp .cache/model-tests dev.pocketconsole.ConsoleTypeTest
