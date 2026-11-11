@@ -59,9 +59,13 @@ int main(void)
     gfxInitDefault();
     svcOutputDebugString("THREEDS_GFX_INIT_END", sizeof("THREEDS_GFX_INIT_END") - 1);
     int sound = 0; /* 0 awaits X, 1 plays, -1 marks DSP startup failure. */
+    bool first = true;
 
+    svcOutputDebugString("THREEDS_BEFORE_APT_LOOP", sizeof("THREEDS_BEFORE_APT_LOOP") - 1);
     while (aptMainLoop()) {
+        if (first) svcOutputDebugString("THREEDS_LOOP_ENTERED", sizeof("THREEDS_LOOP_ENTERED") - 1);
         hidScanInput();
+        if (first) svcOutputDebugString("THREEDS_FIRST_HID_DONE", sizeof("THREEDS_FIRST_HID_DONE") - 1);
         u32 held = hidKeysHeld();
         if (held & KEY_START) break;
         if ((held & KEY_X) && sound == 0) sound = start_audio() ? 1 : -1;
@@ -75,11 +79,19 @@ int main(void)
         else if (circle.dx > 80) fill(GFX_BOTTOM, 255, 255, 0);
         else if (sound < 0) fill(GFX_BOTTOM, 255, 0, 255);
         else fill(GFX_BOTTOM, 0, 0, 255);
+        if (first) svcOutputDebugString("THREEDS_FIRST_FILL_DONE", sizeof("THREEDS_FIRST_FILL_DONE") - 1);
 
         gfxFlushBuffers();
+        if (first) svcOutputDebugString("THREEDS_FIRST_FLUSH_DONE", sizeof("THREEDS_FIRST_FLUSH_DONE") - 1);
         gfxSwapBuffers();
+        if (first) svcOutputDebugString("THREEDS_FIRST_SWAP_DONE", sizeof("THREEDS_FIRST_SWAP_DONE") - 1);
         gspWaitForVBlank();
+        if (first) {
+            svcOutputDebugString("THREEDS_FIRST_VBLANK_DONE", sizeof("THREEDS_FIRST_VBLANK_DONE") - 1);
+            first = false;
+        }
     }
+    svcOutputDebugString("THREEDS_LOOP_EXITED", sizeof("THREEDS_LOOP_EXITED") - 1);
 
     if (sound > 0) { ndspExit(); linearFree(tone); }
     gfxExit();

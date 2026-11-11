@@ -3,9 +3,16 @@ set -eu
 cd "$(dirname "$0")/.."
 
 if [ -n "${DEVKITPRO:-}" ] && [ -n "${DEVKITARM:-}" ]; then
+    if command -v dkp-pacman >/dev/null 2>&1; then
+        dkp-pacman -Q libctru
+    elif command -v pacman >/dev/null 2>&1; then
+        pacman -Q libctru
+    else
+        echo 'libctru package version unavailable in this toolchain'
+    fi
     make -C tests/three_ds
 else
-    image=devkitpro/devkitarm:20260610
+    image=devkitpro/devkitarm@sha256:116afba8df8453961de2936ffab20dd441edf4d682856c1ec8b0e53d7ed0bbf5
     docker pull "$image"
     docker image inspect --format 'devkitPro image {{index .RepoDigests 0}}' "$image"
     docker run --rm -v "$PWD:/work" -w /work "$image" \
