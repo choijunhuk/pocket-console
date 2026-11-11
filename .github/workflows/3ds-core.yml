@@ -7,6 +7,7 @@ on:
       - third_party/azahar.lock.json
       - scripts/prepare-3ds-source.py
       - scripts/build-3ds-core.sh
+      - patches/azahar-retro-run-error.patch
       - .github/workflows/3ds-core.yml
       - tests/test_azahar_source.py
   workflow_dispatch:
@@ -40,7 +41,7 @@ jobs:
         id: core-cache
         with:
           path: .cache/3ds-cores/${{ matrix.abi }}
-          key: azahar-2126.2-${{ matrix.abi }}-${{ hashFiles('third_party/azahar.lock.json', 'scripts/prepare-3ds-source.py', 'scripts/build-3ds-core.sh') }}
+          key: azahar-2126.2-${{ matrix.abi }}-${{ hashFiles('third_party/azahar.lock.json', 'scripts/prepare-3ds-source.py', 'scripts/build-3ds-core.sh', 'patches/azahar-retro-run-error.patch') }}
       - name: Build Azahar
         if: steps.core-cache.outputs.cache-hit != 'true'
         run: ./scripts/build-3ds-core.sh '${{ matrix.abi }}'

@@ -2,5 +2,12 @@
   "version": "2126.2",
   "source_commit": "219d743a1e698101fe1ab8bef43e6563126c3c27",
   "source_url": "https://github.com/azahar-emu/azahar/releases/download/2126.2/azahar-unified-source-2126.2.tar.xz",
-  "source_sha256": "85c8b56fac703df04720125044b8ff887997911858a6cde545dfb1107ba4cd26e"
+  "source_sha256": "85c8b56fac703df04720125044b8ff887997911858a6cde545dfb1107ba4cd26",
+  "patch": {
+    "file": "patches/azahar-retro-run-error.patch",
+    "sha256": "d48910eec4a132bef55a6a5f967e31be77f95a85741019936c2f4805fadb11d5",
+    "source_path": "src/citra_libretro/citra_libretro.cpp",
+    "source_sha256": "7170dc0f6c439c5c387ae5e53766e7fe1ceb2b26a6445ad6ecf6774f6f666792",
+    "patched_sha256": "42a85bdd57c12fd6d8a551fa02cbbc80b45dffd98b91e6c1db87fe41a9a1fef0"
+  }
 }

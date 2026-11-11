@@ -1,0 +1,12 @@
+diff --git a/src/citra_libretro/citra_libretro.cpp b/src/citra_libretro/citra_libretro.cpp
+--- a/src/citra_libretro/citra_libretro.cpp
++++ b/src/citra_libretro/citra_libretro.cpp
+@@ -301,6 +301,7 @@ void retro_run() {
+                 break;
+             }
+ 
+             LibRetro::DisplayMessage(msg.c_str());
++            return;
+         }
+     }
+ }

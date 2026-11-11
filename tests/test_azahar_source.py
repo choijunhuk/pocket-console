@@ -34,6 +34,14 @@ class SourcePreparationTest(unittest.TestCase):
     def run_prepare(self):
         return subprocess.run([sys.executable, str(SCRIPT), "--lock", str(self.lock), "--archive", str(self.archive), "--output", str(self.output)], text=True, capture_output=True)
 
+    def test_repo_lock_matches_official_release_digest_and_patch(self):
+        lock = json.loads((ROOT / "third_party/azahar.lock.json").read_text())
+        self.assertEqual(lock["source_sha256"], "85c8b56fac703df04720125044b8ff887997911858a6cde545dfb1107ba4cd26")
+        self.assertRegex(lock["source_sha256"], r"^[0-9a-f]{64}$")
+        patch = lock["patch"]
+        self.assertEqual(patch["source_path"], "src/citra_libretro/citra_libretro.cpp")
+        self.assertEqual(hashlib.sha256((ROOT / patch["file"]).read_bytes()).hexdigest(), patch["sha256"])
+
     def test_extracts_verified_source_and_writes_marker(self):
         self.make_archive()
         result = self.run_prepare()
@@ -44,8 +52,38 @@ class SourcePreparationTest(unittest.TestCase):
     def test_rejects_hash_mismatch_without_output(self):
         self.make_archive()
         self.archive.write_bytes(self.archive.read_bytes() + b"tamper")
-        self.assertNotEqual(self.run_prepare().returncode, 0)
+        result = self.run_prepare()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("actual SHA256", result.stderr)
+        self.assertIn("bytes", result.stderr)
         self.assertFalse(self.output.exists())
+
+    def test_rejects_65_character_pin_before_download(self):
+        self.make_archive()
+        lock = json.loads(self.lock.read_text())
+        lock["source_sha256"] += "e"
+        self.lock.write_text(json.dumps(lock))
+        result = self.run_prepare()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("invalid source_sha256", result.stderr)
+        self.assertFalse(self.output.exists())
+
+    def test_pinned_patch_exits_after_runtime_error(self):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("prepare_azahar", SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        source = self.output / "src/citra_libretro/citra_libretro.cpp"
+        source.parent.mkdir(parents=True)
+        source.write_text("void retro_run() {\n                break;\n            }\n\n            LibRetro::DisplayMessage(msg.c_str());\n        }\n    }\n}\n")
+        before = hashlib.sha256(source.read_bytes()).hexdigest()
+        expected = source.read_bytes().replace(b"            LibRetro::DisplayMessage(msg.c_str());\n", b"            LibRetro::DisplayMessage(msg.c_str());\n            return;\n")
+        patch_path = ROOT / "patches/azahar-retro-run-error.patch"
+        module.apply_pinned_patch(self.output, patch_path, "src/citra_libretro/citra_libretro.cpp", before, hashlib.sha256(expected).hexdigest(), hashlib.sha256(patch_path.read_bytes()).hexdigest())
+        self.assertEqual(source.read_bytes(), expected)
+        with self.assertRaisesRegex(ValueError, "source file SHA256 mismatch"):
+            module.apply_pinned_patch(self.output, patch_path, "src/citra_libretro/citra_libretro.cpp", before, hashlib.sha256(expected).hexdigest(), hashlib.sha256(patch_path.read_bytes()).hexdigest())
 
     def test_rejects_path_traversal_without_writing_outside(self):
         self.make_archive([(f"{TOP}/../../escaped.txt", b"escape")])

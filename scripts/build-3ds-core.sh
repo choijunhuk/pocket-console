@@ -47,13 +47,14 @@ stage="$(mktemp -d "$(dirname "$output_dir")/.${abi}.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
 cp "$binary" "$stage/libazahar_libretro.so"
 cp "$repo_root/third_party/azahar.lock.json" "$stage/source-manifest.json"
+cp "$repo_root/patches/azahar-retro-run-error.patch" "$stage/azahar-retro-run-error.patch"
 (cd "$source_dir" && find . -type f \( -iname 'license*' -o -iname 'copying*' -o -iname 'notice*' \) -print0 | tar --null -czf "$stage/licenses.tar.gz" -T -)
 tar -tzf "$stage/licenses.tar.gz" > "$stage/license-files.txt"
 if [[ ! -s "$stage/license-files.txt" ]]; then
   echo "Azahar source license archive is missing" >&2
   exit 1
 fi
-(cd "$stage" && sha256sum libazahar_libretro.so licenses.tar.gz license-files.txt source-manifest.json > SHA256SUMS)
+(cd "$stage" && sha256sum libazahar_libretro.so licenses.tar.gz license-files.txt source-manifest.json azahar-retro-run-error.patch > SHA256SUMS)
 if [[ -e "$output_dir" ]]; then
   echo "Output already exists; remove the stale ABI directory first: $output_dir" >&2
   exit 2
