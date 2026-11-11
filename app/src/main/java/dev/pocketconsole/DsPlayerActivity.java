@@ -212,7 +212,8 @@ public final class DsPlayerActivity extends Activity {
         if (landscape) {
             LinearLayout content = row();
             content.addView(screens, new LinearLayout.LayoutParams(0, -2, 1));
-            content.addView(controls, new LinearLayout.LayoutParams(0, -2, 1));
+            // Two 3x48dp pads must fit even with a landscape navigation bar.
+            content.addView(controls, new LinearLayout.LayoutParams(dp(296), -2));
             page.addView(content);
         } else {
             page.addView(screens, new LinearLayout.LayoutParams(-1, -2));

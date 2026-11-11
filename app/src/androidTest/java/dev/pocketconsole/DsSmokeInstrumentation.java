@@ -235,6 +235,7 @@ public final class DsSmokeInstrumentation extends Instrumentation {
             require(screenshot != null, "player screenshot has no blue DS pixels");
             requireFullyVisible(a, screenshot, "A control is off-screen");
             requireFullyVisible(buttons[1], screenshot, "B control is off-screen");
+            requirePlayerControls(activity, screenshot);
             screenshot.recycle();
 
             runOnMainSync(aButton::performClick);
@@ -263,6 +264,7 @@ public final class DsSmokeInstrumentation extends Instrumentation {
             a = buttons[0];
             requireFullyVisible(buttons[0], landscape, "A control is off-screen in landscape");
             requireFullyVisible(buttons[1], landscape, "B control is off-screen in landscape");
+            requirePlayerControls(activity, landscape);
             landscape.recycle();
         } finally {
             if (a != null) {
@@ -270,6 +272,15 @@ public final class DsSmokeInstrumentation extends Instrumentation {
                 runOnMainSync(() -> dispatchButton(button, MotionEvent.ACTION_UP));
             }
             runOnMainSync(activity::finish);
+        }
+    }
+
+    private void requirePlayerControls(Activity activity, Bitmap screenshot) {
+        for (String label : new String[]{"A", "B", "X", "Y", "L", "R", "SELECT", "START", "↑", "↓", "←", "→"}) {
+            final View[] control = {null};
+            runOnMainSync(() -> control[0] = findText(activity.getWindow().getDecorView(), label));
+            require(control[0] != null, "missing player control: " + label);
+            requireFullyVisible(control[0], screenshot, "player control is clipped: " + label);
         }
     }
 
