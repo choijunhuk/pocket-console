@@ -18,6 +18,10 @@ static constexpr int width = 400;
 static constexpr int height = 480;
 static std::vector<uint32_t> pixels(width * height);
 static std::vector<int16_t> audio(16384);
+static std::vector<uint32_t> lastActual;
+static fs::path evidenceDir;
+static uint64_t frameCalls = 0, waitingFrames = 0, readyFrames = 0;
+static uint64_t audioBatches = 0, stereoFrames = 0;
 
 static void require(bool ok, const char* message) {
     if (!ok) throw std::runtime_error(message);
@@ -41,21 +45,28 @@ static bool bottom(char wanted) { return color(pixels[360 * width + 200], wanted
 
 static int run(uint64_t token, int buttons = 0, bool touch = false, int circleX = 0) {
     std::fill(audio.begin(), audio.end(), 0);
+    ++frameCalls;
     const int count = pocket3ds::frame(token, buttons, 160, 120, touch, circleX, 0,
                                        pixels.data(), pixels.size(), audio.data(), audio.size());
     require(count >= -1 && count <= static_cast<int>(audio.size() / 2),
             "invalid 3DS stereo frame count");
+    if (count < 0) ++waitingFrames;
+    else {
+        ++readyFrames;
+        lastActual.assign(pixels.begin(), pixels.end());
+        if (count > 0) { ++audioBatches; stereoFrames += count; }
+    }
     return count;
 }
 
-static void waitFor(uint64_t token, bool (*matches)(), int buttons = 0,
+static void waitFor(uint64_t token, bool (*matches)(), const char* phase, int buttons = 0,
                     bool touch = false, int circleX = 0) {
     const auto deadline = Clock::now() + std::chrono::seconds(90);
     while (Clock::now() < deadline) {
         run(token, buttons, touch, circleX);
         if (matches()) return;
     }
-    throw std::runtime_error("original 3DS homebrew color did not appear within 90 seconds");
+    throw std::runtime_error(std::string("original 3DS homebrew color missing after 90s: ") + phase);
 }
 
 static bool topBlue() { return top('b'); }
@@ -71,20 +82,44 @@ static void test_configuration(uint64_t token) {
 }
 
 static void test_video(uint64_t token) {
-    waitFor(token, topBlue);
+    waitFor(token, topBlue, "top blue");
     require(bottom('r'), "original 3DS homebrew lower red screen missing");
 }
 
 static void test_button(uint64_t token) {
-    waitFor(token, topGreen, 1 << 8);  // libretro A
+    waitFor(token, topGreen, "A top green", 1 << 8);  // libretro A
 }
 
 static void test_touch(uint64_t token) {
-    waitFor(token, bottomYellow, 0, true);
+    waitFor(token, bottomYellow, "touch bottom yellow", 0, true);
 }
 
 static void test_circle(uint64_t token) {
-    waitFor(token, bottomCyan, 0, false, 32767);
+    waitFor(token, bottomCyan, "circle bottom cyan", 0, false, 32767);
+}
+
+static void diagnostics() {
+    std::cerr << "THREEDS_FRAME_DIAG calls=" << frameCalls << " waiting=" << waitingFrames
+              << " ready=" << readyFrames << " audio_batches=" << audioBatches
+              << " stereo_frames=" << stereoFrames << " top_raw=0x" << std::hex
+              << pixels[120 * width + 200] << " bottom_raw=0x"
+              << pixels[360 * width + 200] << std::dec << '\n';
+    if (lastActual.empty()) {
+        std::cerr << "THREEDS_FRAME_DIAG no actual video frame; no PPM emitted\n";
+        return;
+    }
+    const fs::path output = evidenceDir / "last-actual-3ds-frame.ppm";
+    std::ofstream ppm(output, std::ios::binary);
+    ppm << "P6\n" << width << ' ' << height << "\n255\n";
+    std::vector<char> rgb(lastActual.size() * 3);
+    for (size_t i = 0; i < lastActual.size(); ++i) {
+        rgb[3 * i] = static_cast<char>(lastActual[i] >> 16);
+        rgb[3 * i + 1] = static_cast<char>(lastActual[i] >> 8);
+        rgb[3 * i + 2] = static_cast<char>(lastActual[i]);
+    }
+    ppm.write(rgb.data(), rgb.size());
+    require(static_cast<bool>(ppm), "cannot write last actual 3DS frame PPM");
+    std::cerr << "THREEDS_FRAME_DIAG ppm=" << output << '\n';
 }
 
 static void test_audio(uint64_t token) {
@@ -143,6 +178,7 @@ int main(int argc, char** argv) {
         const fs::path rom = fs::absolute(argv[1]);
         const fs::path root = fs::absolute(argv[2]);
         fs::create_directories(root);
+        evidenceDir = root;
         active = pocket3ds::open(rom.string(), root.string(), root.string());
         test_configuration(active);
         test_video(active);
@@ -158,6 +194,12 @@ int main(int argc, char** argv) {
         std::cout << "THREEDS_NATIVE_SMOKE_PASS\n";
     } catch (const std::exception& failure) {
         std::cerr << "THREEDS_NATIVE_SMOKE_FAIL: " << failure.what() << '\n';
+        if (!evidenceDir.empty()) {
+            try { diagnostics(); }
+            catch (const std::exception& artifact) {
+                std::cerr << "THREEDS_FRAME_DIAG artifact_error=" << artifact.what() << '\n';
+            }
+        }
         if (active) {
             try { pocket3ds::close(active); }
             catch (const std::exception& cleanup) {

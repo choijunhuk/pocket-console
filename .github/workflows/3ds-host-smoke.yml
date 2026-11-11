@@ -37,3 +37,9 @@ jobs:
           test -s .cache/three_ds-core/libazahar_libretro.so
       - name: Run actual 3DS core
         run: timeout --kill-after=10 180 ./scripts/test-3ds-native.sh tests/three_ds/smoke.3dsx .cache/three_ds-core/libazahar_libretro.so
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: three-ds-host-frame
+          path: .cache/three_ds-native/runtime/*.ppm
+          if-no-files-found: warn

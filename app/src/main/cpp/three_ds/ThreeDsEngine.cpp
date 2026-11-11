@@ -67,6 +67,8 @@ struct Session {
     bool loaded = false;
     bool contextReset = false;
     bool sawVideo = false;
+    unsigned diagnosticCallbacks = 0;
+    unsigned diagnosticNoVideo = 0;
     int buttons = 0;
     int touchX = 0;
     int touchY = 0;
@@ -384,17 +386,39 @@ void destroyGraphics(Session& session) {
     eglTerminate(session.display);
 }
 
-void readVideo() {
+void readVideo(bool diagnose, unsigned ordinal) {
     auto& session = *g_session;
-    GLint previousFramebuffer = 0, previousPack = 0, previousPbo = 0, previousReadBuffer = 0;
+    GLint previousFramebuffer = 0, previousDrawFramebuffer = 0, previousPack = 0;
+    GLint previousPbo = 0, previousReadBuffer = 0, rowLength = 0, skipRows = 0, skipPixels = 0;
     glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &previousFramebuffer);
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &previousDrawFramebuffer);
     glGetIntegerv(GL_PACK_ALIGNMENT, &previousPack);
     glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &previousPbo);
+    glGetIntegerv(GL_PACK_ROW_LENGTH, &rowLength);
+    glGetIntegerv(GL_PACK_SKIP_ROWS, &skipRows);
+    glGetIntegerv(GL_PACK_SKIP_PIXELS, &skipPixels);
     glGetIntegerv(GL_READ_BUFFER, &previousReadBuffer);
+    const GLenum beforeError = glGetError();
+    while (glGetError() != GL_NO_ERROR) {}
     glBindFramebuffer(GL_READ_FRAMEBUFFER, session.framebuffer);
+    const GLenum status = glCheckFramebufferStatus(GL_READ_FRAMEBUFFER);
+    if (diagnose) {
+        std::fprintf(stderr,
+                     "THREEDS_VIDEO_DIAG #%u fbo=%u status=0x%x read_fbo=%d draw_fbo=%d "
+                     "pbo=%d pack=%d row_length=%d skip_rows=%d skip_pixels=%d gl_prior=0x%x\n",
+                     ordinal, session.framebuffer, status, previousFramebuffer,
+                     previousDrawFramebuffer, previousPbo, previousPack, rowLength,
+                     skipRows, skipPixels, beforeError);
+    }
+    if (rowLength > static_cast<GLint>(kWidth) || skipRows || skipPixels) {
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, previousFramebuffer);
+        g_output->error = "3DS pixel pack state exceeds readback buffer";
+        return;
+    }
     glReadBuffer(GL_COLOR_ATTACHMENT0);
     glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    const GLenum beforeReadError = glGetError();
     while (glGetError() != GL_NO_ERROR) {}
     glReadPixels(0, 0, kWidth, kHeight, GL_RGBA, GL_UNSIGNED_BYTE, session.readback.data());
     const GLenum error = glGetError();
@@ -402,6 +426,9 @@ void readVideo() {
     glBindBuffer(GL_PIXEL_PACK_BUFFER, previousPbo);
     glBindFramebuffer(GL_READ_FRAMEBUFFER, previousFramebuffer);
     glReadBuffer(previousReadBuffer);
+    if (diagnose)
+        std::fprintf(stderr, "THREEDS_VIDEO_DIAG #%u gl_before_read=0x%x gl_after_read=0x%x\n",
+                     ordinal, beforeReadError, error);
     if (error != GL_NO_ERROR) {
         g_output->error = "3DS framebuffer read failed";
         return;
@@ -415,18 +442,39 @@ void readVideo() {
                         (uint32_t(rgba[1]) << 8) | rgba[2];
         }
     }
+    if (diagnose) {
+        const size_t top = ((kHeight - 1 - 120) * kWidth + 200) * 4;
+        const size_t bottom = ((kHeight - 1 - 360) * kWidth + 200) * 4;
+        std::fprintf(stderr,
+                     "THREEDS_VIDEO_DIAG #%u top_rgba=%02x%02x%02x%02x top_argb=%08x "
+                     "bottom_rgba=%02x%02x%02x%02x bottom_argb=%08x\n",
+                     ordinal, session.readback[top], session.readback[top + 1],
+                     session.readback[top + 2], session.readback[top + 3],
+                     g_output->pixels[120 * kWidth + 200], session.readback[bottom],
+                     session.readback[bottom + 1], session.readback[bottom + 2],
+                     session.readback[bottom + 3], g_output->pixels[360 * kWidth + 200]);
+    }
     g_output->video = true;
     session.sawVideo = true;
 }
 
 void video(const void* data, unsigned width, unsigned height, size_t pitch) {
+    if (!g_session) return;
+    const unsigned ordinal = g_session->diagnosticCallbacks;
+    const bool diagnose = ordinal < 3;
+    if (diagnose) {
+        ++g_session->diagnosticCallbacks;
+        std::fprintf(stderr, "THREEDS_VIDEO_DIAG #%u marker=%s width=%u height=%u pitch=%zu output=%d\n",
+                     ordinal + 1, data == RETRO_HW_FRAME_BUFFER_VALID ? "HW" : (data ? "SW" : "NULL"),
+                     width, height, pitch, g_output != nullptr);
+    }
     if (!g_output) return;
     if (data == RETRO_HW_FRAME_BUFFER_VALID) {
         if (width != kWidth || height != kHeight) {
             g_output->error = "Unexpected 3DS video geometry";
             return;
         }
-        readVideo();
+        readVideo(diagnose, ordinal + 1);
         return;
     }
     if (!data) return;
@@ -587,6 +635,10 @@ int frame(uint64_t token, int buttons, int touchX, int touchY, bool down, int ci
         throw;
     }
     g_output = nullptr;
+    if (!output.video && session.diagnosticNoVideo < 3) {
+        std::fprintf(stderr, "THREEDS_NO_VIDEO_DIAG #%u callbacks=%u audio_frames=%zu\n",
+                     ++session.diagnosticNoVideo, session.diagnosticCallbacks, output.frames);
+    }
     if (output.error) throw std::runtime_error(output.error);
     if (!session.message.empty()) throw std::runtime_error(session.message);
     if (!output.video) {
