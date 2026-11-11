@@ -32,6 +32,7 @@ static bool color(uint32_t argb, char wanted) {
     if (wanted == 'g') return g > r + 80 && g > b + 80;
     if (wanted == 'y') return r > b + 80 && g > b + 80;
     if (wanted == 'c') return b > r + 80 && g > r + 80;
+    if (wanted == 'm') return r > g + 80 && b > g + 80;
     return false;
 }
 
@@ -91,7 +92,8 @@ static void test_audio(uint64_t token) {
     bool callback = false;
     bool pcm = false;
     while (Clock::now() < deadline && !pcm) {
-        const int frames = run(token);
+        const int frames = run(token, 1 << 9); // X starts original NDSP PCM tone.
+        require(!bottom('m'), "guest NDSP startup failed");
         if (frames > 0) {
             callback = true;
             pcm |= std::any_of(audio.begin(), audio.begin() + frames * 2,
@@ -99,10 +101,10 @@ static void test_audio(uint64_t token) {
         }
     }
     require(callback, "3DS core produced no stereo audio frames");
-    require(pcm, "original CSND PSG produced no nonzero PCM");
+    require(pcm, "original NDSP PCM tone produced no nonzero samples");
 }
 
-static void test_truncated_rom(const fs::path& rom, const fs::path& root) {
+static void test_truncated_rom(const fs::path& rom, const fs::path& root, uint64_t& active) {
     std::ifstream input(rom, std::ios::binary);
     std::array<char, 16> bytes{};
     input.read(bytes.data(), bytes.size());
@@ -113,18 +115,21 @@ static void test_truncated_rom(const fs::path& rom, const fs::path& root) {
     output.close();
     bool rejected = false;
     try {
-        const uint64_t token = pocket3ds::open(bad.string(), root.string(), root.string());
-        pocket3ds::close(token);
+        active = pocket3ds::open(bad.string(), root.string(), root.string());
     } catch (const std::runtime_error&) { rejected = true; }
+    if (active) { pocket3ds::close(active); active = 0; }
     require(rejected, "truncated 3DSX was accepted");
 }
 
-static void test_stale_close(const fs::path& rom, const fs::path& root, uint64_t old) {
-    const uint64_t current = pocket3ds::open(rom.string(), root.string(), root.string());
+static void test_stale_close(const fs::path& rom, const fs::path& root,
+                             uint64_t old, uint64_t& active) {
+    active = pocket3ds::open(rom.string(), root.string(), root.string());
+    const uint64_t current = active;
     pocket3ds::close(old);
     int metrics[4]{};
     pocket3ds::configuration(current, metrics);
     pocket3ds::close(current);
+    active = 0;
     bool rejected = false;
     try { run(current); }
     catch (const std::runtime_error&) { rejected = true; }
@@ -132,24 +137,33 @@ static void test_stale_close(const fs::path& rom, const fs::path& root, uint64_t
 }
 
 int main(int argc, char** argv) {
+    uint64_t active = 0;
     try {
         require(argc == 3, "usage: smoke ROM WORKDIR");
         const fs::path rom = fs::absolute(argv[1]);
         const fs::path root = fs::absolute(argv[2]);
         fs::create_directories(root);
-        const uint64_t token = pocket3ds::open(rom.string(), root.string(), root.string());
-        test_configuration(token);
-        test_video(token);
-        test_button(token);
-        test_touch(token);
-        test_circle(token);
-        test_audio(token);
-        pocket3ds::close(token);
-        test_truncated_rom(rom, root);
-        test_stale_close(rom, root, token);
+        active = pocket3ds::open(rom.string(), root.string(), root.string());
+        test_configuration(active);
+        test_video(active);
+        test_button(active);
+        test_touch(active);
+        test_circle(active);
+        test_audio(active);
+        const uint64_t old = active;
+        pocket3ds::close(active);
+        active = 0;
+        test_truncated_rom(rom, root, active);
+        test_stale_close(rom, root, old, active);
         std::cout << "THREEDS_NATIVE_SMOKE_PASS\n";
     } catch (const std::exception& failure) {
         std::cerr << "THREEDS_NATIVE_SMOKE_FAIL: " << failure.what() << '\n';
+        if (active) {
+            try { pocket3ds::close(active); }
+            catch (const std::exception& cleanup) {
+                std::cerr << "THREEDS_NATIVE_SMOKE_CLEANUP_FAIL: " << cleanup.what() << '\n';
+            }
+        }
         return 1;
     }
 }

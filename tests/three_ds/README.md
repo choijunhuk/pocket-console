@@ -3,8 +3,11 @@
 `smoke.c` is original homebrew. It uses no game, firmware, DSP dump, or Nintendo asset.
 It draws blue on the top screen and red on the bottom screen; A turns the top green,
 touch turns the bottom yellow, and a rightward circle-pad move turns it cyan. It
-starts a CSND PSG tone, which does not use dumped DSP firmware. The host and Android
-tests require nonzero PCM, so a core without CSND output fails explicitly.
+starts an original NDSP PCM tone when X is held. The fixture creates a zero-byte
+`sdmc:/3ds/dspfirm.cdc` stand-in only when no component exists; Azahar's DSP HLE
+does not execute proprietary firmware. The host and Android tests require nonzero
+PCM, so unsupported DSP output fails explicitly. CSND was removed after CI showed
+Azahar 2126.2 stubs its service and no fixture color appeared after its command call.
 
 Build with `scripts/build-3ds-homebrew.sh`. It emits `tests/three_ds/smoke.3dsx`
 using a local devkitPro installation or the official
@@ -20,4 +23,5 @@ and `libretro.h` from the already pinned melonDS submodule.
 
 API sources: [devkitPro 3DS application template](https://github.com/devkitPro/3ds-examples/tree/master/templates/application),
 [libctru framebuffer API](https://github.com/devkitPro/libctru/blob/master/libctru/include/3ds/gfx.h),
-[libctru CSND API](https://github.com/devkitPro/libctru/blob/master/libctru/include/3ds/services/csnd.h).
+[libctru NDSP API](https://github.com/devkitPro/libctru/blob/master/libctru/include/3ds/ndsp/ndsp.h),
+[devkitPro audio example](https://github.com/devkitPro/3ds-examples/tree/master/audio/streaming).

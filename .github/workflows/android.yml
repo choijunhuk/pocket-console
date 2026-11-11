@@ -9,6 +9,10 @@ permissions:
   contents: read
 
 jobs:
+  three-ds-core:
+    uses: ./.github/workflows/3ds-core.yml
+  three-ds-host:
+    uses: ./.github/workflows/3ds-host-smoke.yml
   native-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -28,6 +32,7 @@ jobs:
           path: .cache/native-smoke/*.ppm
           if-no-files-found: warn
   verify:
+    needs: [three-ds-core, three-ds-host]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -46,7 +51,22 @@ jobs:
         run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.1.12297006'
       - uses: gradle/actions/setup-gradle@v4
       - name: Check file classification
-        run: ./scripts/test-model.sh
+        run: |
+          ./scripts/test-model.sh
+          ./scripts/test-3ds-model.sh
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_*.py' -v
+      - uses: actions/download-artifact@v4
+        with:
+          name: azahar-core-arm64-v8a
+          path: .cache/3ds-cores/arm64-v8a
+      - uses: actions/download-artifact@v4
+        with:
+          name: azahar-core-x86_64
+          path: .cache/3ds-cores/x86_64
+      - uses: actions/download-artifact@v4
+        with:
+          name: three-ds-homebrew
+          path: app/src/androidTest/assets
       - name: Generate original homebrew test asset
         run: python3 tests/native/make_smoke_nds.py app/src/androidTest/assets/smoke.nds
       - name: Build and lint
@@ -56,7 +76,7 @@ jobs:
           apk=app/build/outputs/apk/debug/app-debug.apk
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$apk"
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk"
-          unzip -l "$apk" | grep -E 'lib/(arm64-v8a|x86_64)/lib(pocket_ds|retro|c\+\+_shared)\.so'
+          unzip -l "$apk" | grep -E 'lib/(arm64-v8a|x86_64)/lib(pocket_ds|pocket_3ds|azahar_libretro|retro|c\+\+_shared)\.so'
           sha256sum "$apk" | tee app/build/outputs/apk/debug/app-debug.apk.sha256
       - name: Explain lint failures
         if: failure()
@@ -102,10 +122,18 @@ jobs:
             adb shell wm density 320
             adb install artifacts/outputs/apk/debug/app-debug.apk
             adb install artifacts/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            adb shell dumpsys SurfaceFlinger | grep -i GLES
+            ./scripts/capture-android-ui.sh
             adb shell am instrument -w -r dev.pocketconsole.test/dev.pocketconsole.DsSmokeInstrumentation | tee android-native-smoke.log
             adb exec-out run-as dev.pocketconsole cat cache/smoke-player.png > android-player.png
             base64 -w0 android-player.png | sed 's/^/DS_SCREENSHOT_BASE64:/'
             grep 'DS_ANDROID_SMOKE_PASS' android-native-smoke.log
+            adb shell am instrument -w -r dev.pocketconsole.test/dev.pocketconsole.ThreeDsSmokeInstrumentation | tee three-ds-android-smoke.log
+            adb exec-out run-as dev.pocketconsole cat cache/three-ds-player-portrait.png > three-ds-player-portrait.png
+            adb exec-out run-as dev.pocketconsole cat cache/three-ds-player-landscape.png > three-ds-player-landscape.png
+            base64 -w0 three-ds-player-portrait.png | sed 's/^/THREEDS_PORTRAIT_BASE64:/'
+            base64 -w0 three-ds-player-landscape.png | sed 's/^/THREEDS_LANDSCAPE_BASE64:/'
+            grep 'THREEDS_ANDROID_SMOKE_PASS' three-ds-android-smoke.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -113,4 +141,9 @@ jobs:
           path: |
             android-native-smoke.log
             android-player.png
+            three-ds-android-smoke.log
+            three-ds-player-portrait.png
+            three-ds-player-landscape.png
+            library-light.png
+            library-dark-font.png
           if-no-files-found: warn

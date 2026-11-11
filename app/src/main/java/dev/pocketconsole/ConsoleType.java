@@ -4,8 +4,9 @@ import java.util.Locale;
 
 public enum ConsoleType {
     DS("ds", "DS", "두 화면의 작은 모험", "nds"),
-    THREE_DS("3ds", "3DS", "더 넓어진 휴대용 세계", "3ds", "cci", "cxi"),
-    SWITCH("switch", "Switch", "손안에 들어온 큰 화면", "nro", "nsp", "xci");
+    THREE_DS("3ds", "3DS", "더 넓어진 휴대용 세계", "3ds", "cci", "cxi", "3dsx", "elf"),
+    SWITCH("switch", "Switch", "손안에 들어온 큰 화면", "nro", "nsp", "xci"),
+    SWITCH_TWO("switch2", "Switch 2", "새로운 휴대용 세계", "nsp", "xci");
 
     public final String id;
     public final String label;
@@ -35,5 +36,10 @@ public enum ConsoleType {
             if (console.accepts(name)) return console;
         }
         return null;
+    }
+
+    public static ConsoleType fromImport(String name, ConsoleType selected) {
+        if (selected == SWITCH_TWO && SWITCH_TWO.accepts(name)) return SWITCH_TWO;
+        return fromFileName(name);
     }
 }

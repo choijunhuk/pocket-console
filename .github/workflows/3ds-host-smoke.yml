@@ -1,14 +1,6 @@
 name: 3DS host smoke
 
 on:
-  push:
-    branches: [feat/3ds-emulation]
-    paths:
-      - app/src/main/cpp/three_ds/**
-      - tests/three_ds/**
-      - scripts/build-3ds-homebrew.sh
-      - scripts/test-3ds-native.sh
-      - .github/workflows/3ds-host-smoke.yml
   workflow_dispatch:
   workflow_call:
 

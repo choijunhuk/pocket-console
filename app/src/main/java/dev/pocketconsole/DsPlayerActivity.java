@@ -2,10 +2,8 @@ package dev.pocketconsole;
 
 import android.app.Activity;
 import android.content.res.Configuration;
-import android.graphics.Color;
 import android.graphics.Insets;
 import android.graphics.Typeface;
-import android.graphics.drawable.GradientDrawable;
 import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioManager;
@@ -38,10 +36,8 @@ import java.util.concurrent.locks.LockSupport;
 
 public final class DsPlayerActivity extends Activity {
     static final String EXTRA_ROM_URI = "rom_uri";
-    private static final int PAPER = Color.rgb(243, 240, 232);
-    private static final int INK = Color.rgb(32, 40, 38);
-    private static final int SHELL = Color.rgb(218, 221, 213);
-    private static final int ORANGE = Color.rgb(204, 99, 63);
+    private int PAPER, INK, SHELL, ORANGE;
+    private ConsoleUi ui;
     private static final long FRAME_NANOS = 1_000_000_000_000L / 59826L;
     private static final ExecutorService PLAYER = Executors.newSingleThreadExecutor();
 
@@ -57,14 +53,14 @@ public final class DsPlayerActivity extends Activity {
     private String statusText = "게임을 불러오고 있어요…";
     private TextView status;
     private volatile DsScreenView screens;
+    private ConsoleUi.InputScrollGuard inputGuard;
     private OnBackInvokedCallback backCallback;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        getWindow().setStatusBarColor(PAPER);
-        getWindow().setNavigationBarColor(PAPER);
-        getWindow().getDecorView().setSystemUiVisibility(
-                View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+        ui = new ConsoleUi(this);
+        PAPER = ui.paper; INK = ui.ink; SHELL = ui.shell; ORANGE = ui.accent;
+        ui.applyBars(this);
         buildUi();
         String uri = getIntent().getStringExtra(EXTRA_ROM_URI);
         if (uri == null) { showStatus("DS 파일 주소가 없어요."); return; }
@@ -86,6 +82,7 @@ public final class DsPlayerActivity extends Activity {
         paused = true;
         buttons.set(0);
         touchDown = false;
+        if (inputGuard != null) inputGuard.reset();
         synchronized (lifecycle) { lifecycle.notifyAll(); }
         super.onPause();
     }
@@ -94,6 +91,7 @@ public final class DsPlayerActivity extends Activity {
         super.onConfigurationChanged(configuration);
         buttons.set(0);
         touchDown = false;
+        if (inputGuard != null) inputGuard.reset();
         buildUi();
     }
 
@@ -101,6 +99,7 @@ public final class DsPlayerActivity extends Activity {
         stopped = true;
         buttons.set(0);
         touchDown = false;
+        if (inputGuard != null) inputGuard.reset();
         synchronized (lifecycle) { lifecycle.notifyAll(); }
         if (player != null) player.cancel(true);
         if (Build.VERSION.SDK_INT >= 33 && backCallback != null) {
@@ -110,13 +109,6 @@ public final class DsPlayerActivity extends Activity {
     }
 
     private int dp(float value) { return Math.round(value * getResources().getDisplayMetrics().density); }
-
-    private GradientDrawable background(int color) {
-        GradientDrawable drawable = new GradientDrawable();
-        drawable.setColor(color);
-        drawable.setCornerRadius(dp(14));
-        return drawable;
-    }
 
     private TextView text(String value, int size, boolean bold) {
         TextView view = new TextView(this);
@@ -139,6 +131,7 @@ public final class DsPlayerActivity extends Activity {
         scroll.setFillViewport(true);
         scroll.setMotionEventSplittingEnabled(true);
         scroll.setBackgroundColor(PAPER);
+        inputGuard = new ConsoleUi.InputScrollGuard(scroll);
         scroll.setOnApplyWindowInsetsListener((view, insets) -> {
             if (Build.VERSION.SDK_INT >= 30) {
                 Insets safe = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
@@ -185,7 +178,7 @@ public final class DsPlayerActivity extends Activity {
         status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         page.addView(status);
         boolean landscape = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
-        screens = new DsScreenView(this, landscape, (x, y, down) -> {
+        screens = new DsScreenView(this, landscape, inputGuard, (x, y, down) -> {
             touchX = x;
             touchY = y;
             touchDown = down;
@@ -259,12 +252,13 @@ public final class DsPlayerActivity extends Activity {
         button.setAllCaps(false);
         button.setMinHeight(dp(48));
         button.setMinWidth(dp(48));
-        button.setBackground(background(color));
+        button.setBackground(ui.buttonSurface(color, 14));
         return button;
     }
 
     private Button control(String label, int bit) {
         Button button = plainButton(label, SHELL);
+        ConsoleUi.InputScrollGuard guard = inputGuard;
         button.setContentDescription("DS " + label + " 버튼");
         int flag = 1 << bit;
         boolean[] fromTouch = {false};
@@ -276,6 +270,7 @@ public final class DsPlayerActivity extends Activity {
         button.setOnTouchListener((view, event) -> {
             switch (event.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
+                    guard.hold(button);
                     fromTouch[0] = true;
                     buttons.updateAndGet(value -> value | flag);
                     button.setPressed(true);
@@ -284,11 +279,13 @@ public final class DsPlayerActivity extends Activity {
                     buttons.updateAndGet(value -> value & ~flag);
                     button.setPressed(false);
                     button.performClick();
+                    guard.release(button);
                     fromTouch[0] = false;
                     return true;
                 case MotionEvent.ACTION_CANCEL:
                     buttons.updateAndGet(value -> value & ~flag);
                     button.setPressed(false);
+                    guard.release(button);
                     fromTouch[0] = false;
                     return true;
                 default: return true;

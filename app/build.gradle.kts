@@ -7,9 +7,15 @@ val prepareDsCore by tasks.registering(Exec::class) {
     commandLine("python3", "scripts/prepare-core.py")
 }
 
+val prepareThreeDsCore by tasks.registering(Exec::class) {
+    workingDir(rootProject.projectDir)
+    commandLine("python3", "scripts/prepare-3ds-jni.py")
+}
+
 tasks.configureEach {
     if (name == "preBuild" || name.startsWith("configureNdkBuild") || name.startsWith("buildNdkBuild")) {
         dependsOn(prepareDsCore)
+        dependsOn(prepareThreeDsCore)
     }
 }
 
@@ -22,8 +28,8 @@ android {
         applicationId = "dev.pocketconsole"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.2.0-ds-alpha"
+        versionCode = 3
+        versionName = "0.3.0-3ds-alpha"
         testInstrumentationRunner = "dev.pocketconsole.DsSmokeInstrumentation"
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
@@ -38,6 +44,7 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    sourceSets["main"].jniLibs.srcDir(rootProject.file(".cache/3ds-jni"))
     lint {
         abortOnError = true
     }

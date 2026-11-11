@@ -1,16 +1,8 @@
 name: 3DS core
 
 on:
-  push:
-    branches: [feat/3ds-emulation]
-    paths:
-      - third_party/azahar.lock.json
-      - scripts/prepare-3ds-source.py
-      - scripts/build-3ds-core.sh
-      - patches/azahar-retro-run-error.patch
-      - .github/workflows/3ds-core.yml
-      - tests/test_azahar_source.py
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read

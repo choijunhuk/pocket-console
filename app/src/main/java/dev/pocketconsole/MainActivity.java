@@ -6,7 +6,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.database.Cursor;
-import android.graphics.Color;
 import android.graphics.Insets;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -37,14 +36,17 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.zip.ZipFile;
+import java.io.File;
+import java.io.IOException;
 
 public final class MainActivity extends Activity {
     private static final int PICK_FILE = 10;
-    private static final int PAPER = Color.rgb(243, 240, 232);
-    private static final int INK = Color.rgb(32, 40, 38);
-    private static final int QUIET = Color.rgb(96, 107, 102);
-    private static final int ORANGE = Color.rgb(204, 99, 63);
-    private static final int SHELL = Color.rgb(218, 221, 213);
+    private int PAPER, INK, QUIET, ORANGE, SHELL;
+    private ConsoleUi ui;
+    private DeviceCapabilities capabilities;
+    private boolean threeDsPackaged;
+    private boolean threeDsPresenceChecked;
     private static final String KEY_CONSOLE = "console";
     private static final String KEY_PREVIEW = "preview";
     private static final String UI_PREFS = "console_ui";
@@ -52,6 +54,7 @@ public final class MainActivity extends Activity {
     // Process lifetime keeps a selected document import running through activity recreation.
     private static final ExecutorService DOCUMENT_IO = Executors.newSingleThreadExecutor();
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
+    private static volatile Boolean CORE_3DS_PRESENT;
 
     private LibraryStore library;
     private ConsoleType selected = ConsoleType.DS;
@@ -75,6 +78,9 @@ public final class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        ui = new ConsoleUi(this);
+        PAPER = ui.paper; INK = ui.ink; QUIET = ui.quiet; ORANGE = ui.accent; SHELL = ui.shell;
+        capabilities = DeviceProbe.read(this);
         library = new LibraryStore(this);
         uiPreferences = getSharedPreferences(UI_PREFS, MODE_PRIVATE);
         libraryPreferences = getSharedPreferences(LIBRARY_PREFS, MODE_PRIVATE);
@@ -86,11 +92,19 @@ public final class MainActivity extends Activity {
             ConsoleType restored = consoleForId(uiPreferences.getString(KEY_CONSOLE, null));
             if (restored != null) selected = restored;
         }
-        getWindow().setStatusBarColor(PAPER);
-        getWindow().setNavigationBarColor(PAPER);
-        getWindow().getDecorView().setSystemUiVisibility(
-                View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+        ui.applyBars(this);
         render();
+        Context app = getApplicationContext();
+        DOCUMENT_IO.execute(() -> {
+            boolean packaged = hasThreeDsCore(app);
+            MAIN.post(() -> {
+                if (!isDestroyed() && !isFinishing()) {
+                    threeDsPackaged = packaged;
+                    threeDsPresenceChecked = true;
+                    if (!preview) render();
+                }
+            });
+        });
     }
 
     @Override protected void onResume() {
@@ -121,6 +135,50 @@ public final class MainActivity extends Activity {
         return null;
     }
 
+    private static boolean hasThreeDsCore(Context app) {
+        Boolean cached = CORE_3DS_PRESENT;
+        if (cached != null) return cached;
+        String nativeDir = app.getApplicationInfo().nativeLibraryDir;
+        if (nativeDir != null && new File(nativeDir, "libpocket_3ds.so").isFile()
+                && new File(nativeDir, "libazahar_libretro.so").isFile()) {
+            CORE_3DS_PRESENT = true;
+            return true;
+        }
+        String[] apks = app.getApplicationInfo().splitSourceDirs;
+        String[] paths = new String[(apks == null ? 0 : apks.length) + 1];
+        paths[0] = app.getApplicationInfo().sourceDir;
+        if (apks != null) System.arraycopy(apks, 0, paths, 1, apks.length);
+        String abi = Build.SUPPORTED_ABIS.length == 0 ? "" : Build.SUPPORTED_ABIS[0];
+        boolean frontend = false, core = false;
+        for (String path : paths) {
+            if (path == null) continue;
+            try (ZipFile zip = new ZipFile(path)) {
+                frontend |= zip.getEntry("lib/" + abi + "/libpocket_3ds.so") != null;
+                core |= zip.getEntry("lib/" + abi + "/libazahar_libretro.so") != null;
+            } catch (IOException ignored) { }
+        }
+        CORE_3DS_PRESENT = frontend && core;
+        return frontend && core;
+    }
+
+    private DeviceCapabilities.Compatibility compatibility(ConsoleType type) {
+        return capabilities.check(type);
+    }
+
+    private boolean launchable(ConsoleType type) {
+        return (type == ConsoleType.DS || (type == ConsoleType.THREE_DS && threeDsPackaged))
+                && compatibility(type).state == DeviceCapabilities.Compatibility.State.READY;
+    }
+
+    private String readiness(ConsoleType type) {
+        if (type == ConsoleType.SWITCH_TWO) return "실험적 지원 · 엔진 준비 중";
+        if (type == ConsoleType.SWITCH) return "엔진 준비 중";
+        DeviceCapabilities.Compatibility check = compatibility(type);
+        if (check.state == DeviceCapabilities.Compatibility.State.UNSUPPORTED) return "기기 조건 미충족";
+        if (check.state == DeviceCapabilities.Compatibility.State.UNKNOWN) return "기기 조건 확인 중";
+        return type == ConsoleType.THREE_DS && !threeDsPackaged ? "엔진 준비 중" : "실행 가능";
+    }
+
     @Override protected void onSaveInstanceState(Bundle out) {
         out.putString(KEY_CONSOLE, selected.id);
         out.putBoolean(KEY_PREVIEW, preview);
@@ -138,10 +196,7 @@ public final class MainActivity extends Activity {
     private int dp(float size) { return Math.round(size * getResources().getDisplayMetrics().density); }
 
     private GradientDrawable shape(int color, int radius) {
-        GradientDrawable drawable = new GradientDrawable();
-        drawable.setColor(color);
-        drawable.setCornerRadius(dp(radius));
-        return drawable;
+        return ui.shape(color, radius);
     }
 
     private TextView text(String value, int sp, int color, boolean bold) {
@@ -179,7 +234,7 @@ public final class MainActivity extends Activity {
         button.setAllCaps(false);
         button.setMinHeight(dp(48));
         button.setMinimumHeight(dp(48));
-        button.setBackground(shape(background, 14));
+        button.setBackground(ui.buttonSurface(background, 14));
         return button;
     }
 
@@ -230,103 +285,111 @@ public final class MainActivity extends Activity {
         if (preview) drawPreview(); else drawLibrary();
     }
 
-    private void drawHeader(String eyebrow, String title, String description) {
-        TextView overline = text(eyebrow, 11, ORANGE, true);
-        overline.setLetterSpacing(.18f);
-        page.addView(overline);
-        gap(page, 8);
+    private void drawHeader(String title, String description) {
         page.addView(text(title, 30, INK, true));
         gap(page, 8);
         page.addView(text(description, 14, QUIET, false));
-        gap(page, 24);
+        gap(page, 16);
     }
 
     private void drawLibrary() {
-        drawHeader("POCKET CONSOLE  /  LIBRARY", "내 라이브러리", "내 기기에 있는 파일을 정리하고 조작감을 미리 볼 수 있어요.");
-        LinearLayout tabs = row();
-        for (ConsoleType type : ConsoleType.values()) {
-            Button tab = button(type.label, type == selected ? INK : SHELL, type == selected ? Color.WHITE : INK);
-            tab.setContentDescription(type.label + (type == selected ? ", 선택됨" : ", 선택"));
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(50), 1);
-            params.setMargins(0, 0, dp(6), 0);
-            tabs.addView(tab, params);
-            tab.setOnClickListener(v -> {
-                selected = type;
-                uiPreferences.edit().putString(KEY_CONSOLE, type.id).apply();
-                notice = null;
-                render();
-            });
+        drawHeader("내 라이브러리", "내 파일을 선택해 휴대용 화면에서 이어가세요.");
+        ConsoleType[] choices = ConsoleType.values();
+        for (int y = 0; y < choices.length; y += 2) {
+            LinearLayout tabs = row();
+            for (int x = y; x < Math.min(y + 2, choices.length); x++) {
+                ConsoleType type = choices[x];
+                Button tab = button(type.label + (type == selected ? "  선택" : ""),
+                        type == selected ? INK : SHELL, type == selected ? PAPER : INK);
+                tab.setContentDescription(type.label + ", " + readiness(type)
+                        + (type == selected ? ", 선택됨" : ", 선택"));
+                LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(48), 1);
+                if (x % 2 == 0) params.rightMargin = dp(8);
+                tabs.addView(tab, params);
+                tab.setOnClickListener(v -> {
+                    selected = type;
+                    uiPreferences.edit().putString(KEY_CONSOLE, type.id).apply();
+                    notice = null;
+                    render();
+                });
+            }
+            page.addView(tabs);
+            if (y + 2 < choices.length) gap(page, 8);
         }
-        page.addView(tabs);
-        gap(page, 22);
-
-        LinearLayout hero = column();
-        hero.setPadding(dp(18), dp(20), dp(18), dp(20));
-        hero.setBackground(shape(SHELL, 24));
-        TextView badge = text("조작 미리보기  ·  " + selected.label, 12, ORANGE, true);
-        badge.setLetterSpacing(.06f);
-        hero.addView(badge);
-        gap(hero, 10);
-        hero.addView(text(selected.subtitle, 18, INK, true));
-        gap(hero, 8);
-        hero.addView(text(selected == ConsoleType.DS
-                ? "DS 파일을 누르면 게임을 실행할 수 있어요. 이 화면은 조작 미리보기예요."
-                : "화면과 버튼 반응을 살펴보세요. 게임 실행 기능은 아직 없습니다.", 13, QUIET, false));
-        gap(hero, 16);
-        ConsolePreviewView art = new ConsolePreviewView(this, selected);
-        hero.addView(art, new LinearLayout.LayoutParams(-1, dp(190)));
-        gap(hero, 14);
-        Button open = button("조작 미리보기 열기  ↗", INK, Color.WHITE);
-        open.setContentDescription(selected.label + " 조작 미리보기 열기");
-        hero.addView(open, new LinearLayout.LayoutParams(-1, dp(50)));
-        open.setOnClickListener(v -> { preview = true; render(); });
-        page.addView(hero);
-        gap(page, 26);
+        gap(page, 16);
+        TextView ready = text(selected.label + "  ·  " + readiness(selected), 16, INK, true);
+        page.addView(ready);
+        gap(page, 4);
+        DeviceCapabilities.Compatibility check = compatibility(selected);
+        String detail = selected == ConsoleType.THREE_DS && !threeDsPresenceChecked
+                ? "3DS 엔진 패키지를 확인하고 있어요."
+                : selected == ConsoleType.THREE_DS && !threeDsPackaged
+                && check.state == DeviceCapabilities.Compatibility.State.READY
+                ? "3DS 엔진이 이 빌드에 없어요. 설치 후 실제 실행을 확인합니다."
+                : (selected == ConsoleType.DS || selected == ConsoleType.THREE_DS)
+                ? check.reason : "게임 실행 엔진은 아직 연결되지 않았어요.";
+        page.addView(text(detail, 13, QUIET, false));
+        gap(page, 12);
+        Button importButton = button("파일 가져오기", ORANGE, ui.onAccent);
+        importButton.setContentDescription("기기에서 " + selected.label + " 게임 파일 가져오기");
+        page.addView(importButton, new LinearLayout.LayoutParams(-1, dp(54)));
+        importButton.setOnClickListener(v -> importFile());
+        gap(page, 20);
 
         LinearLayout heading = row();
         TextView fileTitle = text("가져온 파일", 20, INK, true);
         heading.addView(fileTitle, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView count = text(String.valueOf(library.entries(selected).size()), 13, QUIET, true);
+        TextView count = text(String.valueOf(library.entries(selected).size()) + "개", 13, QUIET, true);
         heading.addView(count);
         page.addView(heading);
         gap(page, 12);
         if (notice != null) {
             TextView message = text(notice, 13, ORANGE, false);
             message.setPadding(dp(12), dp(12), dp(12), dp(12));
-            message.setBackground(shape(Color.rgb(250, 229, 217), 12));
+            message.setBackground(shape(ui.notice, 12));
             page.addView(message);
             gap(page, 12);
         }
         List<LibraryStore.Entry> entries = library.entries(selected);
         if (entries.isEmpty()) {
-            TextView empty = text("아직 파일이 없어요. 아래 버튼으로 내 파일을 가져오세요.", 14, QUIET, false);
+            TextView empty = text("아직 가져온 파일이 없어요. 위의 파일 가져오기를 눌러 시작하세요.", 14, QUIET, false);
             empty.setPadding(dp(16), dp(22), dp(16), dp(22));
-            empty.setBackground(shape(Color.WHITE, 16));
+            empty.setBackground(shape(ui.raised, 16));
             page.addView(empty);
         } else {
             for (LibraryStore.Entry entry : entries) drawEntry(entry);
         }
-        gap(page, 16);
-        Button importButton = button("＋  파일 가져오기", ORANGE, Color.WHITE);
-        importButton.setContentDescription("기기에서 게임 파일 가져오기");
-        page.addView(importButton, new LinearLayout.LayoutParams(-1, dp(54)));
-        importButton.setOnClickListener(v -> importFile());
-        gap(page, 14);
-        page.addView(text(selected == ConsoleType.DS
-                ? "DS 게임 실행 가능  ·  원본 파일은 기기에 그대로 보관됩니다."
-                : "코어 연결 예정  ·  파일은 기기에 그대로 보관됩니다.", 12, QUIET, false));
+        gap(page, 24);
+        LinearLayout previewRow = row();
+        TextView previewText = text("조작 미리보기\n게임 화면이 아닌 버튼 배치 확인", 13, QUIET, false);
+        previewRow.addView(previewText, new LinearLayout.LayoutParams(0, -2, 1));
+        Button open = button("열기", SHELL, INK);
+        open.setContentDescription(selected.label + " 조작 미리보기 열기");
+        previewRow.addView(open, new LinearLayout.LayoutParams(dp(72), dp(48)));
+        open.setOnClickListener(v -> { preview = true; render(); });
+        page.addView(previewRow);
+        ConsolePreviewView art = new ConsolePreviewView(this, selected);
+        page.addView(art, new LinearLayout.LayoutParams(-1, dp(105)));
+        gap(page, 8);
+        page.addView(text("원본 파일은 기기에 그대로 보관됩니다.", 12, QUIET, false));
+        if (selected == ConsoleType.THREE_DS) {
+            gap(page, 8);
+            page.addView(text("기기 확인 정보  ·  " + capabilities.summary(), 12, QUIET, false));
+        }
     }
 
     private void drawEntry(LibraryStore.Entry entry) {
-        Button item = button("▣    " + entry.name + "     ›", Color.WHITE, INK);
+        boolean canPlay = launchable(entry.console);
+        Button item = button(entry.name + "  ·  " + (canPlay ? "실행" : "준비 중"), ui.raised, INK);
         item.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
         item.setPadding(dp(16), 0, dp(16), 0);
         item.setContentDescription(entry.name + ", " + entry.console.label + " 파일, "
-                + (entry.console == ConsoleType.DS ? "게임 실행" : "코어 연결 예정"));
+                + (canPlay ? "게임 실행" : readiness(entry.console)));
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(60));
         params.bottomMargin = dp(8);
         page.addView(item, params);
         item.setOnClickListener(v -> openEntry(entry));
+        item.setOnLongClickListener(v -> { confirmRemoval(entry); return true; });
     }
 
     private void importFile() {
@@ -346,11 +409,12 @@ public final class MainActivity extends Activity {
             return;
         }
         Uri uri = data.getData();
+        ConsoleType requested = selected;
         Context app = getApplicationContext();
         WeakReference<MainActivity> target = new WeakReference<>(this);
         showNotice("파일을 확인하고 있어요…");
         DOCUMENT_IO.execute(() -> {
-            ImportResult resultValue = importDocument(app, uri);
+            ImportResult resultValue = importDocument(app, uri, requested);
             MAIN.post(() -> {
                 MainActivity activity = target.get();
                 if (activity == null || activity.isDestroyed() || activity.isFinishing()) return;
@@ -366,10 +430,10 @@ public final class MainActivity extends Activity {
         ImportResult(ConsoleType console, String message) { this.console = console; this.message = message; }
     }
 
-    private static ImportResult importDocument(Context app, Uri uri) {
+    private static ImportResult importDocument(Context app, Uri uri, ConsoleType selected) {
         ContentResolver resolver = app.getContentResolver();
         String name = displayName(resolver, uri);
-        ConsoleType type = ConsoleType.fromFileName(name);
+        ConsoleType type = ConsoleType.fromImport(name, selected);
         if (type == null) return new ImportResult(null, "지원할 파일 형식을 인식하지 못했어요.");
         try {
             try (ParcelFileDescriptor file = resolver.openFileDescriptor(uri, "r")) {
@@ -378,9 +442,8 @@ public final class MainActivity extends Activity {
             resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
             boolean added = new LibraryStore(app).add(name, uri.toString(), type);
             app.getSharedPreferences(UI_PREFS, MODE_PRIVATE).edit().putString(KEY_CONSOLE, type.id).commit();
-            return new ImportResult(type, added ? (type == ConsoleType.DS
-                    ? "DS 파일을 목록에 추가했어요. 파일을 눌러 실행하세요."
-                    : "파일을 목록에 추가했어요. 실행은 코어 연결 후 가능해요.") : "이미 가져온 파일이에요.");
+            return new ImportResult(type, added ? "파일을 목록에 추가했어요. 파일을 눌러 상태를 확인하세요."
+                    : "이미 가져온 파일이에요.");
         } catch (IllegalStateException e) {
             return new ImportResult(null, "파일 목록을 저장할 수 없어요. 다시 시도해 주세요.");
         } catch (Exception e) {
@@ -399,9 +462,10 @@ public final class MainActivity extends Activity {
     }
 
     private void openEntry(LibraryStore.Entry entry) {
-        if (entry.console == ConsoleType.DS) {
-            Intent player = new Intent(this, DsPlayerActivity.class);
-            player.putExtra(DsPlayerActivity.EXTRA_ROM_URI, entry.uri);
+        if (launchable(entry.console)) {
+            Intent player = new Intent(this, entry.console == ConsoleType.DS
+                    ? DsPlayerActivity.class : ThreeDsPlayerActivity.class);
+            player.putExtra("rom_uri", entry.uri);
             startActivity(player);
             return;
         }
@@ -420,21 +484,34 @@ public final class MainActivity extends Activity {
                 activity.notice = null;
                 activity.render();
                 if (canRead) {
-                    new AlertDialog.Builder(activity).setTitle("코어 연결 예정")
-                            .setMessage(entry.name + "\n\n파일을 읽을 수 있어요. 게임 실행 코어는 아직 연결되지 않았습니다. 조작 미리보기에서 버튼 반응만 확인할 수 있어요.")
+                    String reason = activity.compatibility(entry.console).state
+                            == DeviceCapabilities.Compatibility.State.UNSUPPORTED
+                            ? activity.compatibility(entry.console).reason
+                            : "게임 실행 엔진을 아직 사용할 수 없어요.";
+                    new AlertDialog.Builder(activity).setTitle(activity.readiness(entry.console))
+                            .setMessage(entry.name + "\n\n" + reason
+                                    + " 조작 미리보기에서 버튼 배치만 확인할 수 있어요.")
                             .setPositiveButton("조작 미리보기", (dialog, which) -> { activity.selected = entry.console; activity.preview = true; activity.render(); })
                             .setNegativeButton("닫기", null).show();
                 } else {
                     new AlertDialog.Builder(activity).setTitle("파일 접근 불가")
-                            .setMessage("파일을 읽을 수 없어요. 이동하거나 접근 권한이 해제되었을 수 있습니다. 목록에서 지울 수 있어요.")
-                            .setPositiveButton("목록에서 지우기", (dialog, which) -> {
-                                try { activity.library.remove(entry.uri); activity.render(); }
-                                catch (RuntimeException failure) { activity.showNotice("파일 목록을 저장할 수 없어요. 다시 시도해 주세요."); }
-                            })
+                            .setMessage("원본 파일이 이동했거나 읽기 권한이 해제되었어요. 목록은 유지됩니다.")
+                            .setPositiveButton("파일 다시 선택", (dialog, which) -> activity.importFile())
+                            .setNeutralButton("목록에서 지우기", (dialog, which) -> activity.confirmRemoval(entry))
                             .setNegativeButton("유지", null).show();
                 }
             });
         });
+    }
+
+    private void confirmRemoval(LibraryStore.Entry entry) {
+        new AlertDialog.Builder(this).setTitle("목록에서 지울까요?")
+                .setMessage(entry.name + "의 목록 항목만 지웁니다. 원본 파일은 삭제되지 않아요.")
+                .setPositiveButton("목록에서 지우기", (dialog, which) -> {
+                    try { library.remove(entry.uri); render(); }
+                    catch (RuntimeException error) { showNotice("파일 목록을 저장할 수 없어요. 다시 시도해 주세요."); }
+                })
+                .setNegativeButton("유지", null).show();
     }
 
     private void showNotice(String message) { notice = message; render(); }
@@ -445,13 +522,14 @@ public final class MainActivity extends Activity {
         page.addView(back, new LinearLayout.LayoutParams(dp(142), dp(48)));
         back.setOnClickListener(v -> { preview = false; render(); });
         gap(page, 22);
-        drawHeader("POCKET CONSOLE  /  " + selected.label, "조작 미리보기", "화면 배치와 버튼 입력을 확인하세요.");
+        drawHeader("조작 미리보기", selected.label + " 화면 배치와 버튼 입력을 확인하세요.");
         ConsolePreviewView art = new ConsolePreviewView(this, selected);
-        page.addView(art, new LinearLayout.LayoutParams(-1, dp(selected == ConsoleType.SWITCH ? 245 : 340)));
+        page.addView(art, new LinearLayout.LayoutParams(-1,
+                dp(selected == ConsoleType.SWITCH || selected == ConsoleType.SWITCH_TWO ? 245 : 340)));
         gap(page, 18);
-        TextView status = text(selected == ConsoleType.DS ? "조작 테스트" : "코어 연결 예정", 14, ORANGE, true);
+        TextView status = text("조작 테스트 · 게임 화면 아님", 14, ORANGE, true);
         status.setPadding(dp(14), dp(12), dp(14), dp(12));
-        status.setBackground(shape(Color.rgb(250, 229, 217), 12));
+        status.setBackground(shape(ui.notice, 12));
         page.addView(status);
         gap(page, 8);
         page.addView(text("이 화면은 조작 테스트입니다. 게임을 실행하거나 저장하지 않습니다.", 13, QUIET, false));
@@ -494,7 +572,7 @@ public final class MainActivity extends Activity {
     }
 
     private Button control(String name, String symbol) {
-        Button button = button(symbol, INK, Color.WHITE);
+        Button button = button(symbol, INK, PAPER);
         button.setContentDescription(name + " 버튼");
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(48), dp(48));
         params.setMargins(dp(2), dp(2), dp(2), dp(2));
@@ -502,12 +580,10 @@ public final class MainActivity extends Activity {
         button.setOnTouchListener((view, event) -> {
             int action = event.getActionMasked();
             if (action == MotionEvent.ACTION_DOWN) {
-                button.setBackground(shape(ORANGE, 14));
                 pressedButtons.add(name);
                 updatePressedStatus();
                 view.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
             } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-                button.setBackground(shape(INK, 14));
                 pressedButtons.remove(name);
                 updatePressedStatus();
             }

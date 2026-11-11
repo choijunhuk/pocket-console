@@ -1,79 +1,54 @@
 # Design
 
-## Source of truth
-- Status: Active; initial direction, pending device review.
-- Last refreshed: 2026-11-11.
-- Primary surfaces: Android library, console selection, console controller preview, future gameplay.
-- Evidence: user requests Android, DS + 3DS + Switch, and the feeling of using a physical Nintendo handheld. Specific colors and app name below are proposals.
+## Authority and direction
 
-## Brand
-- Pocket Console: tactile, quiet, nostalgic hardware.
-- Original wordmark, artwork and sounds. Use hardware proportions and interaction cues.
-- Avoid distracting effects over game output; status must be truthful.
+- Status: active design contract for the Android app; device review pending. Refreshed 2026-11-11.
+- Purpose: make a player's own local games easy to find and launch, then make touch play feel like holding a compact console.
+- Tone: quiet, warm, tactile hardware. The memorable detail is a pair of correctly proportioned inset LCDs held by a hinge and restrained physical control feedback.
+- Preserve the current warm paper, gray shell, LCD green, and orange world. `docs/screenshots/ds-player-alpha.png` is the rendered DS alpha reference, not proof of final visual quality.
+- Use original lettering, artwork, and sounds. Hardware proportions may inspire the app; do not copy console logos or artwork.
 
-## Product goals
-- One Android app with three distinct handheld experiences.
-- Deliverable v0.2: integrated DS player plus DS/3DS/Switch controller previews and persistent local game-file catalog.
-- Longer-term: integrated, separately maintained native cores, DS first, then 3DS, then Switch.
-- Non-goals for v0.2: 3DS/Switch execution, game downloads, firmware/key distribution, cloud accounts, multiplayer, billing, quick saves.
-- Success: native build/test/lint pass; library survives restart; unsupported execution is clearly described; controller demo responds to input.
+## Product truth
 
-## Personas and jobs
-- Player opening their own local files on Android.
-- Touch controls in portrait for dual-screen handhelds; landscape for Switch. Physical controller support follows core integration.
+- Target: one local Android library with four selected systems: DS, 3DS, Switch, Switch 2. The current selector has three; Switch 2 is still to be added.
+- DS is the currently integrated player. Its two 256 × 192 screens, touch, buttons, audio, and existing save path must keep working.
+- 3DS execution is in development. Show **실행 준비 중** until its packaged core and actual device acceptance pass. Its player uses a 400 × 240 upper screen and 320 × 240 lower touch screen.
+- Switch execution is pending. Switch 2 is a separate, experimental catalog target; Hokkaido is only a candidate backend. A filename or controller preview never establishes executable support.
+- Readiness is per system and device: **실행 가능**, **엔진 준비 중**, **기기 조건 미충족**, or **실험적 지원**. State the specific unmet API, ABI, graphics, or memory prerequisite when known. Never gate by phone model or promise a frame rate or game compatibility from prerequisites alone.
+- Galaxy S23 Ultra is a reference handset for review, not a device whitelist. Other capable Android phones should work.
+- No accounts, ROM downloads, firmware/key distribution, fake game frames, or quick-save claims. Imported files stay local; save data lives in app-private storage.
 
-## Information architecture
-- Library: select DS / 3DS / Switch, import a file, see imported titles, open a controller preview.
-- Controller preview: two screens for DS/3DS, one for Switch, touch feedback, back to library.
-- DS entries open the actual player; 3DS/Switch entries display a core-pending explanation. Controller previews remain labeled control tests.
+## Primary flow
 
-## Design principles
-- Hardware silhouette, inset screens, hinge, speaker grille, and raised buttons establish the handheld feeling.
-- Comfortable targets take priority over exact hardware scale. Minimum 48dp for interactive controls.
-- Keep files local and request access through Android's file picker.
+1. Open the library. The selected system, its honest readiness, **파일 가져오기**, and imported titles are visible before the controller preview.
+2. Import with Android's document picker. Show checking, success, duplicate, unsupported format, unreadable file, and revoked-access outcomes without erasing existing entries.
+3. Tap an executable title to play. A pending title explains why it cannot launch and offers **조작 미리보기** as a secondary action. Never present preview as gameplay.
+4. On return, show a recent title only when an actual last-opened record exists. Do not infer play history from import order. Preserve selected system and library state.
+5. When leaving play, indicate normal shutdown/save finalization while it happens. Report completion only after it succeeds; give a recoverable error if it fails. This is regular in-game save handling, not a quick save.
 
-## Visual language
-- Warm paper background #F3F0E8; ink #202826; soft gray hardware #DADDD5; LCD green #C8D6A3; restrained orange #CC633F.
-- System sans-serif and monospace status labels; no downloadable fonts.
-- Rhythm: 8dp units, 20–24dp page edges, rounded hardware shell and inset screen borders.
-- DS: warm gray clamshell, equal screens, hinge, D-pad and ABXY. In gameplay, fit both displays and 48dp controls in a normal 360x640dp viewport; use an adjacent control panel in landscape.
-- 3DS: darker shell, wider upper screen, smaller touch screen, circle pad.
-- Switch: landscape, dark center screen, muted blue and orange side controllers.
-- Motion: brief press feedback; no compulsory startup animation. Original vector/drawn artwork only.
+## Visual system
 
-## Components
-- Platform Android Views, custom controller preview drawing where necessary.
-- Console selector, cartridge-style file row, import button, inset LCD, directional/button controls, status badge.
-- States: selected, pressed, empty, unsupported file, revoked access, core pending.
-- DESIGN.md owns palette and visual rules; ConsoleType owns console metadata.
+- Base tokens: paper `#F3F0E8`, ink `#202826`, shell `#DADDD5`, LCD `#C8D6A3`, orange `#CC633F`. Use semantic surface/text/action/status roles in code, including a deliberate dark scheme; do not merely invert colors. Check body text at 4.5:1 and large text at 3:1 in both schemes.
+- Android Views and Java 17, with no new UI runtime dependency. Keep legible system `sp` text and reserve original lettering for the Pocket Console mark. Let typographic scale, weight, and spacing carry hierarchy instead of decorative all-caps labels.
+- Use an 8 dp spacing rhythm and 20–24 dp library edges. The library should read as a list of cartridges beside one primary import action, not a stack of equally weighted cards. A small hardware illustration can identify the selected console after the list.
+- The game display is the focal plane. Frame real output inside a dark inset LCD with a subtle bevel, hinge line, and speaker detail. Do not tint or animate over game pixels. Use one short depression/release treatment on button presses; optional haptic tick follows system settings.
+- DS keeps equal 4:3 screens. 3DS keeps the top screen 5:3 and the lower screen 4:3, with the lower width at 80% of the upper at the same scale. Use a circle pad for 3DS and touch on its lower screen. Switch and Switch 2 use a single landscape display with differentiated side grips in previews only.
+- Native control semantics take precedence over sculpture: minimum 48 × 48 dp targets, 8 dp separation where possible, clear selected/pressed/focus/disabled states, descriptive Korean accessibility names, and visible text alongside color-coded readiness.
 
-## Accessibility
-- Native accessible controls, descriptive Korean labels, 48dp targets, no color-only status.
-- Preview button state must also appear as text. Optional subtle haptics; respect system settings.
-- Preview is a visual/controller test; complete gameplay accessibility requires a later device pass.
+## Adaptive behavior
 
-## Responsive behavior
-- Fit system bars/cutouts using window insets.
-- Small screens scroll rather than clip. Handle orientation changes without losing library data.
-- Switch preview prefers landscape; DS/3DS portrait, with reasonable fallback in either orientation.
+- Apply status bar, navigation bar, cutout, and IME insets. Honor system Back and predictive Back. Content can scroll on compact screens; no screen or required control may be clipped.
+- Check portrait 360 × 640 dp, landscape 640 × 360 dp, a tablet layout, and a split window. The DS and 3DS players prioritize screens plus reachable controls in portrait; landscape places controls alongside screens where space allows. Constrain shell width on tablets instead of stretching buttons.
+- Check font scale 1.3, dark theme, focus order, screen-reader labels, and reduced animations. Keep the player operable with simultaneous directional and face-button input.
 
-## Interaction states
-- Empty: explain local file import; provide controller preview without a file.
-- Error: explain unsupported extension or unreadable permission; preserve existing entries.
-- Success: imported title appears in its console category.
-- Core pending: show explicit unavailable status; do not simulate game execution or advertise working save states.
-- Offline: all v0.1 features work locally.
+## Screen and state contract
 
-## Content voice
-- Brief Korean interface with conventional DS / 3DS / Switch names.
-- Use “조작 미리보기” and “코어 연결 예정”; never label a demo as emulation.
+- Library: selected system → readiness → import/recent (when real) → title list → controller preview. Empty state points directly to import. A title row says **실행** only when that system can open it on this device.
+- Player: compact Back/exit, a live status line, correctly scaled displays, then controls. Loading identifies the phase; failure names the problem and a next action. Unsupported device, unreadable URI, encrypted/unsupported game, graphics failure, and native load failure have distinct copy.
+- Preview: explicitly labeled **조작 미리보기**, responsive to presses, and escapable with Android Back. It does not show a fabricated game frame.
+- Use concise Korean action labels. Confirm destructive removal of a library entry and clarify that it removes the catalog reference, not the original file.
 
-## Implementation constraints
-- Native Android SDK/Java 17, minSdk 26, target/compile SDK 36, Gradle wrapper and pinned NDK 27.1.12297006.
-- No UI runtime dependencies. DS embeds pinned libretro/melonDS with tracked correctness/build patches; model checks require only the JDK.
-- Before core integration: review the exact upstream revision, license and security patches.
-- Validate build, lint, file classification/deduplication, and on-device interaction separately.
+## Evidence and implementation boundary
 
-## Open questions
-- Target phone model and preferred hardware color: user can refine after first preview.
-- Final name and distribution route: decide before first public release. The combined DS build follows GPLv3-or-later.
+- Existing Android Views code supplies the warm palette, console preview, file catalog, and DS player. `docs/design/handheld-surfaces.md` gives the surface handoff. The proposed hierarchy and dark scheme are design changes, not shipped behavior.
+- Verify the actual imported-file-to-player path, DS regression, 3DS homebrew output when packaged, error recovery, and device layouts separately. A build or screenshot alone does not establish device compatibility.

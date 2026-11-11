@@ -1,5 +1,7 @@
 .gradle/
 .cache/
+__pycache__/
+*.pyc
 .idea/
 **/build/
 **/.cxx/

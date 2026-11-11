@@ -10,3 +10,5 @@ LOCAL_C_INCLUDES := $(LOCAL_PATH)/../../../../third_party/melonDS/src/libretro/l
 LOCAL_CPPFLAGS := -std=c++17 -fexceptions
 LOCAL_SHARED_LIBRARIES := retro
 include $(BUILD_SHARED_LIBRARY)
+
+include $(POCKET_LOCAL_PATH)/three_ds/Android.mk

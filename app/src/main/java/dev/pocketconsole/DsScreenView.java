@@ -23,14 +23,19 @@ final class DsScreenView extends View {
     private final RectF top = new RectF();
     private final RectF bottom = new RectF();
     private final TouchListener touch;
+    private final ConsoleUi ui;
+    private final ConsoleUi.InputScrollGuard scrollGuard;
     private final boolean horizontal;
     private final int inset;
     private final int hinge;
     private int activePointer = -1;
 
-    DsScreenView(Context context, boolean horizontal, TouchListener listener) {
+    DsScreenView(Context context, boolean horizontal, ConsoleUi.InputScrollGuard scrollGuard,
+                 TouchListener listener) {
         super(context);
         touch = listener;
+        this.scrollGuard = scrollGuard;
+        ui = new ConsoleUi(context);
         this.horizontal = horizontal;
         float density = getResources().getDisplayMetrics().density;
         inset = Math.round(12 * density);
@@ -60,7 +65,7 @@ final class DsScreenView extends View {
         super.onDraw(canvas);
         int[] pixels = newest.getAndSet(null);
         if (pixels != null) bitmap.setPixels(pixels, 0, 256, 0, 0, 256, 384);
-        paint.setColor(Color.rgb(218, 221, 213));
+        paint.setColor(ui.shell);
         canvas.drawRoundRect(0, 0, getWidth(), getHeight(), inset, inset, paint);
         float widthLimit = horizontal ? (getWidth() - 2f * inset - hinge) / 2
                 : getWidth() - 2f * inset;
@@ -77,9 +82,15 @@ final class DsScreenView extends View {
                 horizontal ? y : y + displayHeight + hinge,
                 horizontal ? left + 2 * displayWidth + hinge : left + displayWidth,
                 horizontal ? y + displayHeight : y + 2 * displayHeight + hinge);
-        paint.setColor(Color.rgb(32, 40, 38));
+        paint.setColor(0xff1c2526);
+        canvas.drawRoundRect(top.left - 3, top.top - 3, top.right + 3, top.bottom + 3, 4, 4, paint);
+        canvas.drawRoundRect(bottom.left - 3, bottom.top - 3, bottom.right + 3, bottom.bottom + 3, 4, 4, paint);
         canvas.drawRect(top, paint);
         canvas.drawRect(bottom, paint);
+        float seam = horizontal ? top.right + hinge / 2f : top.bottom + hinge / 2f;
+        paint.setColor(ui.quiet);
+        if (horizontal) canvas.drawRoundRect(seam - 1, inset, seam + 1, getHeight() - inset, 1, 1, paint);
+        else canvas.drawRoundRect(inset, seam - 1, getWidth() - inset, seam + 1, 1, 1, paint);
         paint.setColor(Color.WHITE);
         canvas.drawBitmap(bitmap, topSource, top, paint);
         canvas.drawBitmap(bitmap, bottomSource, bottom, paint);
@@ -90,7 +101,7 @@ final class DsScreenView extends View {
         if (action == MotionEvent.ACTION_DOWN) {
             if (!bottom.contains(event.getX(), event.getY())) return false;
             activePointer = event.getPointerId(0);
-            getParent().requestDisallowInterceptTouchEvent(true);
+            scrollGuard.hold(this);
             update(event.getX(), event.getY());
             return true;
         }
@@ -103,7 +114,7 @@ final class DsScreenView extends View {
                 && event.getPointerId(event.getActionIndex()) == activePointer)) {
             activePointer = -1;
             touch.changed(0, 0, false);
-            getParent().requestDisallowInterceptTouchEvent(false);
+            scrollGuard.release(this);
         }
         return true;
     }
