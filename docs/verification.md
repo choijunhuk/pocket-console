@@ -2,6 +2,8 @@
 
 Initial foundation, 2026-11-11. Results distinguish source checks, APK build and actual device use.
 
+This page is the historical v0.1 foundation record. See [DS alpha verification](ds-verification.md) for the current integrated DS build and runtime evidence.
+
 | Check | Result | Evidence |
 | --- | --- | --- |
 | File classification regression | PASS | `./scripts/test-model.sh`: 20 checks. Watched expected failure with missing classifier, then pass. |

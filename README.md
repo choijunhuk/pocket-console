@@ -44,7 +44,7 @@ GitHub Actions의 **Android** 워크플로도 동일한 검사 후 `pocket-conso
 
 Switch 빌드/부팅 가능성은 초기 기술 검증 대상으로 먼저 확인합니다. 실제 기능 추가는 DS → 3DS → Switch 순서로 진행합니다. 모든 휴대폰이나 모든 게임의 동작을 보장하는 계획은 아닙니다.
 
-상세: [디자인 기준](DESIGN.md), [구조와 코어 후보](docs/architecture.md), [검증 기록](docs/verification.md), [초기 구현 계획](docs/superpowers/plans/2026-11-11-foundation.md).
+상세: [디자인 기준](DESIGN.md), [구조와 코어 후보](docs/architecture.md), [DS 검증 기록](docs/ds-verification.md), [실제 실행 화면](docs/screenshots/ds-player-alpha.png).
 
 ## 파일과 소스
 

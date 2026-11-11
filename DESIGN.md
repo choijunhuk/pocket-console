@@ -76,4 +76,4 @@
 
 ## Open questions
 - Target phone model and preferred hardware color: user can refine after first preview.
-- Final name and distribution/license choice: confirm before first public release.
+- Final name and distribution route: decide before first public release. The combined DS build follows GPLv3-or-later.
