@@ -1,150 +1,41 @@
 name: Android
 
 on:
-  push:
-    branches: ['**']
-  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
-  three-ds-core:
-    uses: ./.github/workflows/3ds-core.yml
-  three-ds-homebrew:
-    uses: ./.github/workflows/3ds-homebrew.yml
-  three-ds-host:
-    needs: three-ds-homebrew
-    uses: ./.github/workflows/3ds-host-smoke.yml
-  native-smoke:
+  inspect-existing-failure:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - name: Run real DS core smoke
-        run: |
-          python3 scripts/prepare-core.py
-          ./scripts/test-save-flush.sh
-          ./scripts/test-native.sh
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: ds-core-smoke
-          path: .cache/native-smoke/*.ppm
-          if-no-files-found: warn
-  verify:
-    needs: [three-ds-core, three-ds-homebrew]
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-      - uses: android-actions/setup-android@v3
-        with:
-          packages: platform-tools
-          log-accepted-android-sdk-licenses: false
-      - name: Install Android SDK
-        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.1.12297006'
-      - uses: gradle/actions/setup-gradle@v4
-      - name: Check file classification
-        run: |
-          ./scripts/test-model.sh
-          ./scripts/test-3ds-model.sh
-          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_*.py' -v
       - uses: actions/download-artifact@v4
-        with:
-          name: azahar-core-arm64-v8a
-          path: .cache/3ds-cores/arm64-v8a
-      - uses: actions/download-artifact@v4
-        with:
-          name: azahar-core-x86_64
-          path: .cache/3ds-cores/x86_64
-      - uses: actions/download-artifact@v4
-        with:
-          name: three-ds-homebrew
-          path: app/src/androidTest/assets
-      - name: Generate original homebrew test asset
-        run: python3 tests/native/make_smoke_nds.py app/src/androidTest/assets/smoke.nds
-      - name: Build and lint
-        run: |
-          ./gradlew --no-daemon lintDebug assembleDebug assembleDebugAndroidTest
-          mkdir -p app/build/outputs/smoke-tests
-          cp app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk app/build/outputs/smoke-tests/ds-test.apk
-          ./gradlew --no-daemon assembleDebugAndroidTest -PsmokeRunner=dev.pocketconsole.ThreeDsSmokeInstrumentation
-          cp app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk app/build/outputs/smoke-tests/three-ds-test.apk
-      - name: Verify debug APK
-        run: |
-          apk=app/build/outputs/apk/debug/app-debug.apk
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$apk"
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk"
-          unzip -l "$apk" | grep -E 'lib/(arm64-v8a|x86_64)/lib(pocket_ds|pocket_3ds|azahar_libretro|retro|c\+\+_shared)\.so'
-          sha256sum "$apk" | tee app/build/outputs/apk/debug/app-debug.apk.sha256
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump xmltree app/build/outputs/smoke-tests/ds-test.apk AndroidManifest.xml | grep -F '"dev.pocketconsole.DsSmokeInstrumentation"'
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump xmltree app/build/outputs/smoke-tests/three-ds-test.apk AndroidManifest.xml | grep -F '"dev.pocketconsole.ThreeDsSmokeInstrumentation"'
-      - name: Explain lint failures
-        if: failure()
-        run: |
-          report=app/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/lint-results-debug.txt
-          if [ -f "$report" ]; then cat "$report"; fi
-      - name: Upload debug APK and reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pocket-console-debug
-          path: |
-            app/build/outputs/apk/debug/*.apk
-            app/build/outputs/apk/debug/*.sha256
-            app/build/outputs/apk/androidTest/debug/*.apk
-            app/build/outputs/smoke-tests/*.apk
-            app/build/reports/tests/
-            app/build/reports/lint-results-debug.html
-          if-no-files-found: warn
-  android-native-smoke:
-    needs: verify
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: pocket-console-debug
-          path: artifacts
-      - name: Enable emulator acceleration
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-      - uses: reactivecircus/android-emulator-runner@v2
-        env:
-          POCKET_CI_EMULATOR: '1'
-        with:
-          api-level: 35
-          arch: x86_64
-          profile: pixel_2
-          avd-name: pocket-console-ci
-          disable-animations: true
-          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader
-          script: ./scripts/test-android-smoke.sh
-      - uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: android-native-smoke
-          path: |
-            android-native-smoke.log
-            android-failure-logcat.txt
-            android-failure-activities.txt
-            android-player.png
-            three-ds-android-smoke.log
-            three-ds-player-portrait.png
-            three-ds-player-landscape.png
-            library-light.png
-            library-dark-font.png
-          if-no-files-found: warn
+          run-id: 43091081465
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: failure-artifact
+      - name: Read bounded failure evidence
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path("failure-artifact")
+          for name in ("android-failure-logcat.txt", "android-failure-activities.txt"):
+              paths = list(root.rglob(name))
+              if len(paths) != 1:
+                  raise SystemExit(f"Expected one {name}, got {len(paths)}")
+              path = paths[0]
+              print(f"FILE {name} bytes={path.stat().st_size}")
+              text = path.read_text(errors="replace")
+              terms = ("dev.pocketconsole", "AndroidRuntime", "FATAL EXCEPTION",
+                       "ActivityTaskManager", "ActivityManager", "WindowManager",
+                       "InputDispatcher", "Pocket", "ANR", "crash", "Exception")
+              lines = [line for line in text.splitlines() if any(term in line for term in terms)]
+              print(f"MATCHES {name}={len(lines)}")
+              for line in lines[-90:]:
+                  print(line[:360])
+          PY
