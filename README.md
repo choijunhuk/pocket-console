@@ -1,5 +1,7 @@
 # Pocket Console
 
+[Android 알파 APK 다운로드](https://github.com/choijunhuk/pocket-console/releases/tag/v0.3.0-alpha.1) · Android 8.0+ ARM64/x86_64. 비공개 저장소 접근 권한이 있는 GitHub 로그인이 필요합니다. 현재 DS·UI 검증을 통과했으며, 3DS와 Switch 계열은 개발 중입니다.
+
 Android에서 **DS · 3DS · Switch · Switch 2를 실제 휴대용 게임기처럼 다루는 경험**을 목표로 하는 프로젝트입니다.
 
 > **현재 개발 브랜치: 0.3 통합 알파. DS 실행 검증을 유지하며 Azahar 3DS 코어와 플레이 화면을 연결했습니다. 3DS 실제 실행 수락 검증은 진행 중이고, Switch·Switch 2 실행 엔진은 아직 앱에 연결되지 않았습니다.**
