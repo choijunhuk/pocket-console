@@ -9,6 +9,7 @@ import android.graphics.Rect;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.SystemClock;
+import android.util.Base64;
 import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
@@ -24,6 +25,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.nio.file.Files;
 import java.util.Arrays;
 
 /** Runs the original DS homebrew against the packaged JNI and core on an emulator. */
@@ -34,11 +36,13 @@ public final class DsSmokeInstrumentation extends Instrumentation {
     private Method open;
     private Method frame;
     private Method close;
+    private Bundle arguments;
     private final int[] pixels = new int[WIDTH * HEIGHT];
     private final short[] audio = new short[8192];
 
     @Override public void onCreate(Bundle arguments) {
         super.onCreate(arguments);
+        this.arguments = arguments;
         start();
     }
 
@@ -73,6 +77,15 @@ public final class DsSmokeInstrumentation extends Instrumentation {
             testStaleClose(rom, root);
             Log.i(TAG, "native_checks_end");
             testPlayerUi(rom, root);
+            if (arguments != null && "true".equals(arguments.getString("pocketExportScreenshot"))) {
+                File screenshot = new File(getTargetContext().getCacheDir(), "smoke-player.png");
+                require(screenshot.length() > 8 && screenshot.length() <= 512 * 1024,
+                        "DS screenshot is missing or too large to export");
+                Bundle screenshotStatus = new Bundle();
+                screenshotStatus.putString("stream", "DS_SCREENSHOT_BASE64:"
+                        + Base64.encodeToString(Files.readAllBytes(screenshot.toPath()), Base64.NO_WRAP));
+                sendStatus(0, screenshotStatus);
+            }
             result.putString("stream", "DS_ANDROID_SMOKE_PASS cache/smoke-player.png");
             Log.i(TAG, "DS_ANDROID_SMOKE_PASS");
             finish(Activity.RESULT_OK, result);

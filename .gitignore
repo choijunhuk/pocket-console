@@ -1,5 +1,7 @@
 .gradle/
 .cache/
+.secrets/
+.omc/
 .worktrees/
 __pycache__/
 *.pyc

@@ -1,0 +1,234 @@
+name: Android alpha release
+
+on:
+  push:
+    tags: ['v*-alpha.*']
+
+permissions:
+  contents: read
+
+jobs:
+  three-ds-core:
+    uses: ./.github/workflows/3ds-core.yml
+  three-ds-homebrew:
+    uses: ./.github/workflows/3ds-homebrew.yml
+  ds-native-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Run the real DS core and save checks
+        run: |
+          python3 scripts/prepare-core.py
+          ./scripts/test-save-flush.sh
+          ./scripts/test-native.sh
+
+  build:
+    needs: [three-ds-core, three-ds-homebrew]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Require committed release notes
+        run: test -s "docs/releases/${GITHUB_REF_NAME#v}.md"
+      - name: Require release signing identity
+        env:
+          POCKET_ANDROID_KEYSTORE_BASE64: ${{ secrets.POCKET_ANDROID_KEYSTORE_BASE64 }}
+          POCKET_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.POCKET_ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          test -n "$POCKET_ANDROID_KEYSTORE_BASE64"
+          test -n "$POCKET_ANDROID_KEYSTORE_PASSWORD"
+          umask 077
+          printf '%s' "$POCKET_ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/pocket-console-release.p12"
+          test -s "$RUNNER_TEMP/pocket-console-release.p12"
+          echo "POCKET_ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/pocket-console-release.p12" >> "$GITHUB_ENV"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: Install Android SDK
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.1.12297006'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Verify source and packaging boundaries
+        run: |
+          ./scripts/test-model.sh
+          ./scripts/test-3ds-model.sh
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_*.py' -v
+      - uses: actions/download-artifact@v4
+        with:
+          name: azahar-core-arm64-v8a
+          path: .cache/3ds-cores/arm64-v8a
+      - uses: actions/download-artifact@v4
+        with:
+          name: azahar-core-x86_64
+          path: .cache/3ds-cores/x86_64
+      - uses: actions/download-artifact@v4
+        with:
+          name: three-ds-homebrew
+          path: app/src/androidTest/assets
+      - name: Prepare original DS test ROM
+        run: python3 tests/native/make_smoke_nds.py app/src/androidTest/assets/smoke.nds
+      - name: Build signed release and its test APKs
+        env:
+          POCKET_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.POCKET_ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          ./gradlew --no-daemon lintRelease assembleRelease assembleReleaseAndroidTest -PpocketTestBuildType=release
+          mkdir -p app/build/outputs/smoke-tests
+          cp app/build/outputs/apk/androidTest/release/app-release-androidTest.apk app/build/outputs/smoke-tests/ds-test.apk
+          ./gradlew --no-daemon assembleReleaseAndroidTest -PpocketTestBuildType=release -PsmokeRunner=dev.pocketconsole.ThreeDsSmokeInstrumentation
+          cp app/build/outputs/apk/androidTest/release/app-release-androidTest.apk app/build/outputs/smoke-tests/three-ds-test.apk
+      - name: Verify APK, native alignment and signing identity
+        run: |
+          apk=app/build/outputs/apk/release/app-release.apk
+          signer="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          aapt="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          "$signer" verify --verbose --print-certs "$apk" | tee release-apk-verification.txt
+          expected="$(tr -d '[:space:]' < docs/releases/android-signing-certificate.sha256)"
+          actual="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' release-apk-verification.txt)"
+          test -n "$actual"
+          test "$actual" = "$expected"
+          for test_apk in app/build/outputs/smoke-tests/ds-test.apk app/build/outputs/smoke-tests/three-ds-test.apk; do
+            "$signer" verify --verbose --print-certs "$test_apk" > test-apk-verification.txt
+            test "$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' test-apk-verification.txt)" = "$expected"
+          done
+          "$aapt" dump badging "$apk" | grep -F "package: name='dev.pocketconsole'"
+          expected_version="${GITHUB_REF_NAME#v}"
+          expected_code="$(python3 -c 'import re; from pathlib import Path; values=re.findall(r"versionCode\s*=\s*(\d+)", Path("app/build.gradle.kts").read_text()); assert len(values)==1; print(values[0])')"
+          "$aapt" dump badging "$apk" | grep -F "versionCode='$expected_code' versionName='$expected_version'"
+          if "$aapt" dump badging "$apk" | grep -q '^application-debuggable'; then exit 1; fi
+          "$aapt" dump xmltree app/build/outputs/smoke-tests/ds-test.apk AndroidManifest.xml | grep -F '"dev.pocketconsole.DsSmokeInstrumentation"'
+          "$aapt" dump xmltree app/build/outputs/smoke-tests/three-ds-test.apk AndroidManifest.xml | grep -F '"dev.pocketconsole.ThreeDsSmokeInstrumentation"'
+          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 4 "$apk"
+          python3 scripts/verify-release-apk.py "$apk"
+      - name: Bundle exact corresponding source and release hashes
+        run: |
+          release_tag="$GITHUB_REF_NAME"
+          mkdir -p release
+          cp app/build/outputs/apk/release/app-release.apk "release/PocketConsole-${release_tag}.apk"
+          cp THIRD_PARTY_NOTICES.md release/THIRD_PARTY_NOTICES.md
+          cp docs/releases/android-signing-certificate.pem release/android-signing-certificate.pem
+          python3 scripts/prepare-3ds-source.py --output .cache/azahar-source
+          python3 scripts/build-release-source.py --tag "$release_tag" --output "release/PocketConsole-source-${release_tag}.tar.gz"
+          tar -tzf "release/PocketConsole-source-${release_tag}.tar.gz" | grep -F 'pocket-console/third_party/azahar/license.txt'
+          tar -tzf "release/PocketConsole-source-${release_tag}.tar.gz" | grep -F 'pocket-console/third_party/melonDS/LICENSE'
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          import subprocess
+          release_tag = os.environ["GITHUB_REF_NAME"]
+          archive = Path("release") / f"PocketConsole-source-{release_tag}.tar.gz"
+          apk = Path("release") / f"PocketConsole-{release_tag}.apk"
+          digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
+          manifest = {
+              "tag": release_tag,
+              "source_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+              "apk_sha256": digest(apk),
+              "source_bundle_sha256": digest(archive),
+              "signing_certificate_sha256": Path("docs/releases/android-signing-certificate.sha256").read_text().strip(),
+          }
+          Path("release/release-manifest.json").write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n")
+          PY
+          (cd release && sha256sum "PocketConsole-${release_tag}.apk" "PocketConsole-source-${release_tag}.tar.gz" release-manifest.json THIRD_PARTY_NOTICES.md android-signing-certificate.pem > SHA256SUMS && sha256sum -c SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pocket-console-release-distribution
+          path: release/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pocket-console-release-test-apks
+          path: app/build/outputs/smoke-tests/*.apk
+          if-no-files-found: error
+      - name: Explain lint failure
+        if: failure()
+        run: |
+          report=app/build/intermediates/lint_intermediate_text_report/release/lintReportRelease/lint-results-release.txt
+          if [ -f "$report" ]; then cat "$report"; fi
+
+  android-native-smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: pocket-console-release-distribution
+          path: release
+      - uses: actions/download-artifact@v4
+        with:
+          name: pocket-console-release-test-apks
+          path: artifacts/outputs/smoke-tests
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        env:
+          POCKET_CI_EMULATOR: '1'
+          POCKET_RELEASE_SMOKE: '1'
+          POCKET_ANDROID_APK: release/PocketConsole-${{ github.ref_name }}.apk
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_2
+          avd-name: pocket-console-ci
+          disable-animations: true
+          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader
+          script: ./scripts/test-android-smoke.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pocket-console-release-android-smoke
+          path: |
+            android-native-smoke.log
+            android-failure-logcat.txt
+            android-failure-activities.txt
+            android-player.png
+            three-ds-android-smoke.log
+            library-light.png
+            library-dark-font.png
+          if-no-files-found: warn
+
+  publish:
+    needs: [build, android-native-smoke, ds-native-smoke]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: pocket-console-release-distribution
+          path: release
+      - name: Publish verified prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          release_tag="$GITHUB_REF_NAME"
+          test -f "docs/releases/${release_tag#v}.md"
+          (cd release && sha256sum -c SHA256SUMS)
+          if ! gh release view "$release_tag" >/dev/null 2>&1; then
+            gh release create "$release_tag" --verify-tag --draft --prerelease --title "Pocket Console ${release_tag#v} Android alpha" --notes-file "docs/releases/${release_tag#v}.md"
+          fi
+          test "$(gh release view "$release_tag" --json isDraft --jq .isDraft)" = true
+          gh release upload "$release_tag" \
+            "release/PocketConsole-${release_tag}.apk" \
+            "release/PocketConsole-source-${release_tag}.tar.gz" \
+            release/SHA256SUMS release/release-manifest.json \
+            release/THIRD_PARTY_NOTICES.md release/android-signing-certificate.pem --clobber
+          assets="$(gh release view "$release_tag" --json assets --jq '.assets[].name')"
+          for name in "PocketConsole-${release_tag}.apk" "PocketConsole-source-${release_tag}.tar.gz" SHA256SUMS release-manifest.json THIRD_PARTY_NOTICES.md android-signing-certificate.pem; do
+            printf '%s\n' "$assets" | grep -Fx "$name"
+          done
+          gh release edit "$release_tag" --draft=false --prerelease
+          gh release view "$release_tag" --json url,isDraft,isPrerelease,assets

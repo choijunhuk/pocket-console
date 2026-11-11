@@ -2,6 +2,9 @@ plugins {
     id("com.android.application")
 }
 
+val releaseStore = providers.environmentVariable("POCKET_ANDROID_KEYSTORE_FILE").orNull
+val releasePassword = providers.environmentVariable("POCKET_ANDROID_KEYSTORE_PASSWORD").orNull
+
 val prepareDsCore by tasks.registering(Exec::class) {
     workingDir(rootProject.projectDir)
     commandLine("python3", "scripts/prepare-core.py")
@@ -28,8 +31,8 @@ android {
         applicationId = "dev.pocketconsole"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.3.0-3ds-alpha"
+        versionCode = 4
+        versionName = "0.3.0-alpha.1"
         testInstrumentationRunner = providers.gradleProperty("smokeRunner")
             .orElse("dev.pocketconsole.DsSmokeInstrumentation").get()
         ndk {
@@ -39,6 +42,22 @@ android {
             ndkBuild {
                 arguments += "NDK_APPLICATION_MK=${file("src/main/cpp/Application.mk")}"
             }
+        }
+    }
+    testBuildType = providers.gradleProperty("pocketTestBuildType").orElse("debug").get()
+    signingConfigs {
+        if (!releaseStore.isNullOrBlank() && !releasePassword.isNullOrBlank()) {
+            create("pocketRelease") {
+                storeFile = file(releaseStore)
+                storePassword = releasePassword
+                keyAlias = "pocket-console"
+                keyPassword = releasePassword
+            }
+        }
+    }
+    buildTypes {
+        getByName("release") {
+            signingConfig = signingConfigs.findByName("pocketRelease")
         }
     }
     compileOptions {

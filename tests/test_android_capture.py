@@ -33,6 +33,8 @@ elif args[:2] == ["exec-out", "run-as"]:
 elif args == ["shell", "getprop", "ro.opengles.version"]:
     print(os.environ.get("FAKE_GLES", "unknown"))
 elif args[:3] == ["shell", "am", "instrument"]:
+    if args[-1].endswith(".DsSmokeInstrumentation") and os.environ.get("FAKE_RELEASE") == "yes":
+        print("INSTRUMENTATION_STATUS: stream=DS_SCREENSHOT_BASE64:iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9bnm4AAAAASUVORK5CYII=")
     print("DS_ANDROID_SMOKE_PASS" if args[-1].endswith(".DsSmokeInstrumentation")
           else "fixture runtime failure")
 """
@@ -74,7 +76,7 @@ class AndroidCaptureTests(unittest.TestCase):
 
 
 class AndroidSmokePrerequisiteTests(unittest.TestCase):
-    def run_smoke(self, gles, timed_out=False):
+    def run_smoke(self, gles, timed_out=False, release=False):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             adb = root / "adb"
@@ -89,7 +91,11 @@ class AndroidSmokePrerequisiteTests(unittest.TestCase):
             (root / "scripts/stop-ci-emulator.py").symlink_to(SCRIPT.with_name("stop-ci-emulator.py"))
             env = dict(os.environ, PATH=f"{root}:{os.environ['PATH']}",
                        FAKE_ADB_ROOT=str(root), FAKE_READY="yes", FAKE_GLES=gles,
-                       FAKE_TIMEOUT="yes" if timed_out else "no")
+                       FAKE_TIMEOUT="yes" if timed_out else "no",
+                       FAKE_RELEASE="yes" if release else "no",
+                       POCKET_RELEASE_SMOKE="1" if release else "",
+                       POCKET_ANDROID_APK="artifacts/outputs/apk/release/app-release.apk"
+                       if release else "artifacts/outputs/apk/debug/app-debug.apk")
             result = subprocess.run(["sh", str(SCRIPT.with_name("test-android-smoke.sh"))],
                                     cwd=root, env=env, text=True, capture_output=True)
             calls = [json.loads(line) for line in (root / "calls.jsonl").read_text().splitlines()]
@@ -119,6 +125,23 @@ class AndroidSmokePrerequisiteTests(unittest.TestCase):
         self.assertEqual(result.returncode, 124)
         self.assertNotIn("DS_ANDROID_SMOKE_PASS", result.stdout)
         self.assertIn(["logcat", "-d", "-v", "threadtime"], calls)
+
+    def test_release_uses_actual_instrumentation_png_without_run_as(self):
+        result, calls = self.run_smoke("196608", release=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("DS_SCREENSHOT_FROM_INSTRUMENTATION_PASS", result.stdout)
+        self.assertIn("THREEDS_ANDROID_SMOKE_NOT_RUN_EXPERIMENTAL", result.stdout)
+        self.assertIn(["install", "artifacts/outputs/apk/release/app-release.apk"], calls)
+        self.assertIn(["install", "-t", "artifacts/outputs/smoke-tests/ds-test.apk"], calls)
+        self.assertFalse(any(call[:2] == ["exec-out", "run-as"] for call in calls))
+
+    def test_release_does_not_accept_untested_3ds_on_gles32_driver(self):
+        result, calls = self.run_smoke("196610", release=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("THREEDS_ANDROID_SMOKE_NOT_RUN_EXPERIMENTAL", result.stdout)
+        self.assertNotIn("THREEDS_ANDROID_SMOKE_PASS", result.stdout)
+        self.assertFalse(any(call[-1].endswith(".ThreeDsSmokeInstrumentation") for call in calls))
+        self.assertNotIn(["shell", "getprop", "ro.opengles.version"], calls)
 
 
 if __name__ == "__main__":
