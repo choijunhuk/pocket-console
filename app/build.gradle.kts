@@ -30,7 +30,8 @@ android {
         targetSdk = 36
         versionCode = 3
         versionName = "0.3.0-3ds-alpha"
-        testInstrumentationRunner = "dev.pocketconsole.DsSmokeInstrumentation"
+        testInstrumentationRunner = providers.gradleProperty("smokeRunner")
+            .orElse("dev.pocketconsole.DsSmokeInstrumentation").get()
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
         }
