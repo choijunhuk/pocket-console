@@ -6,6 +6,11 @@
 #include "input_common/drivers/virtual_gamepad.h"
 #include "jni/native.h"
 
+extern "C" JNIEXPORT jint JNICALL
+Java_org_yuzu_yuzu_1emu_NativeLibrary_probeNativeBridge(JNIEnv*, jclass) {
+    return 0x50435332; // PCS2: this Pocket Console adapter, without constructing a session.
+}
+
 void EmulationSession::OnFirstFramePresented() {
     JNIEnv* env = Common::Android::GetEnvForThread();
     jclass callbacks = Common::Android::GetNativeLibraryClass();

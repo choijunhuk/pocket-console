@@ -2,6 +2,7 @@ import java.io.File;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import org.yuzu.yuzu_emu.NativeLibrary;
+import org.yuzu.yuzu_emu.applets.keyboard.SoftwareKeyboard;
 
 public final class SwitchNativeLibraryTest {
     public static void main(String[] args) throws Exception {
@@ -24,6 +25,18 @@ public final class SwitchNativeLibraryTest {
                 throw new AssertionError("symlink escaped");
             if (NativeLibrary.getParentDirectory("relative-file") != null)
                 throw new AssertionError("relative native path accepted");
+            if (NativeLibrary.class.getMethod("probeNativeBridge").getReturnType() != int.class)
+                throw new AssertionError("Native bridge probe ABI changed");
+            Class<?> config = SoftwareKeyboard.KeyboardConfig.class;
+            Class<?> data = SoftwareKeyboard.KeyboardData.class;
+            if (config.getField("max_text_length").getType() != int.class
+                    || config.getField("disable_cancel_button").getType() != boolean.class
+                    || config.getField("initial_text").getType() != String.class
+                    || data.getField("result").getType() != int.class
+                    || data.getField("text").getType() != String.class
+                    || SoftwareKeyboard.class.getMethod("executeNormal", config).getReturnType() != data) {
+                throw new AssertionError("Pinned native keyboard ABI changed");
+            }
             System.out.println("SWITCH_JAVA_PATH_PASS");
         } finally {
             Files.deleteIfExists(link.toPath());

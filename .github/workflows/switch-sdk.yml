@@ -12,12 +12,14 @@ on:
       - scripts/build-switch-probe.sh
       - scripts/build-switch-sdk.sh
       - scripts/build-switch-sdk-objects.py
+      - scripts/stage-switch-sdk-runtime.py
       - scripts/test-switch-java.sh
       - scripts/prepare-switch-source.py
       - scripts/prepare-switch-host-tool.py
       - third_party/switch*.lock.json
       - tests/test_switch_sdk_hook.py
       - tests/test_switch_sdk_objects.py
+      - tests/test_switch_sdk_runtime.py
       - tests/SwitchNativeLibraryTest.java
       - .github/workflows/switch-sdk.yml
 
@@ -46,12 +48,13 @@ jobs:
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_switch_host_tool.py' -v
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_switch_sdk_hook.py' -v
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_switch_sdk_objects.py' -v
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_switch_sdk_runtime.py' -v
           ./scripts/test-switch-java.sh
       - uses: actions/cache@v4
         id: sdk-cache
         with:
           path: .cache/switch-probes/pocket-switch2-arm64-v8a
-          key: pocket-switch2-sdk-ndk28.2-cmake3.31.5-${{ hashFiles('third_party/switch*.lock.json', 'scripts/prepare-switch-source.py', 'scripts/prepare-switch-host-tool.py', 'scripts/build-switch-probe.sh', 'scripts/build-switch-sdk.sh', 'switch/native/**', 'tests/test_switch_sdk_hook.py', '.github/workflows/switch-sdk.yml') }}
+          key: pocket-switch2-sdk-ndk28.2-cmake3.31.5-${{ hashFiles('third_party/switch*.lock.json', 'scripts/prepare-switch-source.py', 'scripts/prepare-switch-host-tool.py', 'scripts/build-switch-probe.sh', 'scripts/build-switch-sdk.sh', 'scripts/stage-switch-sdk-runtime.py', 'switch/native/**', 'tests/test_switch_sdk_hook.py', '.github/workflows/switch-sdk.yml') }}
       - name: Build Pocket Console source target
         if: steps.sdk-cache.outputs.cache-hit != 'true'
         run: ./scripts/build-switch-sdk.sh
@@ -60,12 +63,43 @@ jobs:
           cd .cache/switch-probes/pocket-switch2-arm64-v8a
           sha256sum --check SHA256SUMS
           test -s libpocket_switch2.so
+          test -s runtime/arm64-v8a/libpocket_switch2.so
+          test -s runtime-deps.json
           test -s shared-libraries.txt
           test -s license-files.txt
-          tar -tzf sdl-java-bootstrap.tar.gz | grep -q 'org/libsdl/app/SDL.java'
+          tar -tzf sdl-java-bootstrap.tar.gz | grep -Fx 'org/libsdl/app/SDL.java' >/dev/null
           grep -q AArch64 probe-elf-header.txt
           grep -q 'SONAME.*libpocket_switch2.so' probe-dynamic-section.txt
           grep -q '(NEEDED)' probe-dynamic-section.txt
+      - name: Preserve linked ELF diagnostics if packaging fails
+        if: failure()
+        run: |
+          binary=.cache/hokkaido-build/arm64-v8a/pocket-switch-sdk/libpocket_switch2.so
+          if [[ -s "$binary" ]]; then
+            mkdir -p .cache/switch-sdk-link-debug
+            cp "$binary" .cache/switch-sdk-link-debug/libpocket_switch2.so
+            cp third_party/switch-hokkaido.lock.json .cache/switch-sdk-link-debug/source-lock.json
+            cp third_party/switch-glslang.lock.json .cache/switch-sdk-link-debug/host-tool-lock.json
+            cp .cache/hokkaido-source/.pocket-console-submodules.txt .cache/switch-sdk-link-debug/submodule-status.txt
+            cp .cache/glslang-host-source/LICENSE.txt .cache/switch-sdk-link-debug/glslang-LICENSE.txt
+            readelf="$ANDROID_SDK_ROOT/ndk/28.2.13676358/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+            "$readelf" -d "$binary" > .cache/switch-sdk-link-debug/dynamic-section.txt
+            "$readelf" -h "$binary" > .cache/switch-sdk-link-debug/elf-header.txt
+            sha256sum "$binary" > .cache/switch-sdk-link-debug/linked-binary-sha256.txt
+            find .cache/hokkaido-build .cache/hokkaido-source -type f -name '*.so' -print0 \
+              | sort -z | xargs -0 -r sha256sum > .cache/switch-sdk-link-debug/candidate-sha256.txt
+            find .cache/hokkaido-source -path '*/.git' -prune -o -type f \
+              \( -iname 'license*' -o -iname 'copying*' -o -iname 'notice*' \) -print0 \
+              | tar --null -czf .cache/switch-sdk-link-debug/licenses.tar.gz --files-from -
+            tar -tzf .cache/switch-sdk-link-debug/licenses.tar.gz \
+              > .cache/switch-sdk-link-debug/license-files.txt
+          fi
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: pocket-switch2-sdk-link-debug
+          path: .cache/switch-sdk-link-debug/
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: pocket-switch2-sdk-source-arm64

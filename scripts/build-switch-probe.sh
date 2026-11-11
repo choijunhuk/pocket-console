@@ -93,8 +93,12 @@ sha256sum "$validator" > "$stage/host-tool-sha256.txt"
 cp "$build_dir/CMakeCache.txt" "$stage/CMakeCache.txt"
 if [[ "$target" == pocket_switch2 ]]; then
   cp "$build_dir/pocket-switch-sdk/native.cpp" "$stage/pocket-native-source.cpp"
+  cp "$ndk/NOTICE" "$stage/android-ndk-NOTICE.txt"
+  cp "$ndk/NOTICE.toolchain" "$stage/android-ndk-NOTICE.toolchain.txt"
   tar -C "$sdl_java" -czf "$stage/sdl-java-bootstrap.tar.gz" org/libsdl/app
-  tar -tzf "$stage/sdl-java-bootstrap.tar.gz" | grep -q 'org/libsdl/app/SDL.java'
+  tar -tzf "$stage/sdl-java-bootstrap.tar.gz" | grep -Fx 'org/libsdl/app/SDL.java' >/dev/null
+  python3 "$repo_root/scripts/stage-switch-sdk-runtime.py" \
+    "$stage" "$build_dir" "$source_dir" "$ndk" "$readelf"
 fi
 cat > "$stage/build-manifest.txt" <<EOF
 Source: Hokkaido android-0.6.2 (exact commit and URL in source-lock.json)
@@ -134,7 +138,11 @@ checksums=("$artifact" source-lock.json host-tool-lock.json glslang-LICENSE.txt
   shared-library-sha256.txt probe-dynamic-section.txt probe-elf-header.txt
   licenses.tar.gz license-files.txt)
 if [[ "$target" == pocket_switch2 ]]; then
-  checksums+=(pocket-native-source.cpp sdl-java-bootstrap.tar.gz)
+  checksums+=(pocket-native-source.cpp sdl-java-bootstrap.tar.gz runtime-deps.json
+    android-ndk-NOTICE.txt android-ndk-NOTICE.toolchain.txt)
+  while IFS= read -r runtime_file; do
+    checksums+=("$runtime_file")
+  done < <(cd "$stage" && find runtime/arm64-v8a -type f -name '*.so' | sort)
 fi
 (cd "$stage" && sha256sum "${checksums[@]}" > SHA256SUMS)
 mv "$stage" "$output_dir"

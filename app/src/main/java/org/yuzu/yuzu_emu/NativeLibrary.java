@@ -25,14 +25,26 @@ public final class NativeLibrary {
 
     private static volatile WeakReference<Listener> listener = new WeakReference<>(null);
     private static volatile boolean initialized;
+    private static String loadedBackend;
 
     private NativeLibrary() {}
 
-    public static synchronized void initialize(Listener owner)
+    public static native int probeNativeBridge();
+
+    public static synchronized void initialize(Listener owner, String backend)
             throws ReflectiveOperationException {
+        if (!"pocket_switch2".equals(backend) && !"pocket_switch".equals(backend)) {
+            throw new IllegalArgumentException("Unexpected native backend");
+        }
+        if (loadedBackend != null && !loadedBackend.equals(backend)) {
+            throw new IllegalStateException("Another Switch backend is loaded in this process");
+        }
         listener = new WeakReference<>(owner);
         if (initialized) return;
-        System.loadLibrary("pocket_switch2");
+        if (loadedBackend == null) {
+            System.loadLibrary(backend);
+            loadedBackend = backend;
+        }
         Class<?> sdl = Class.forName("org.libsdl.app.SDL");
         sdl.getMethod("setupJNI").invoke(null);
         initJvm();
@@ -176,6 +188,7 @@ public final class NativeLibrary {
     }
 
     public static int openContentUri(String path, String mode) {
+        // shortcut: content URIs are unsupported, add a validated SAF bridge before direct provider loading.
         return -1;
     }
 

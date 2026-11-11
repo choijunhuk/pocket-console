@@ -161,6 +161,7 @@ public final class Switch2PlayerActivity extends Activity
         surfaceReady = false;
         releaseInputs();
         if (started && !ending) {
+            // shortcut: surface loss ends play, implement a GPU-safe swap before resuming a session.
             ending = true;
             failure = "화면 연결이 끊겨 게임을 종료했어요. 다시 실행해 주세요.";
             message(failure);
@@ -171,7 +172,7 @@ public final class Switch2PlayerActivity extends Activity
     private void runSession(Surface surface) {
         boolean nativeSurface = false;
         try {
-            NativeLibrary.initialize(this);
+            NativeLibrary.initialize(this, "pocket_switch2");
             NativeLibrary.setAppDirectory(userRoot.getAbsolutePath());
             backendReady = true;
             if (ending || !surfaceReady || !surface.isValid()) return;
@@ -296,15 +297,25 @@ public final class Switch2PlayerActivity extends Activity
         root.addView(header);
 
         LinearLayout body = new LinearLayout(this);
-        body.setOrientation(LinearLayout.HORIZONTAL);
+        boolean compact = getResources().getConfiguration().screenWidthDp < 600;
+        body.setOrientation(compact ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
         body.setGravity(Gravity.CENTER);
         root.addView(body, new LinearLayout.LayoutParams(-1, 0, 1));
-        body.addView(sideControls(true), new LinearLayout.LayoutParams(dp(152), -1));
         display = new SurfaceView(this);
         display.getHolder().setFormat(android.graphics.PixelFormat.OPAQUE);
         display.setOnTouchListener(this::surfaceTouch);
-        body.addView(display, new LinearLayout.LayoutParams(0, -1, 1));
-        body.addView(sideControls(false), new LinearLayout.LayoutParams(dp(152), -1));
+        if (compact) {
+            body.addView(display, new LinearLayout.LayoutParams(-1, 0, 1));
+            LinearLayout controls = new LinearLayout(this);
+            controls.setGravity(Gravity.CENTER);
+            controls.addView(sideControls(true), new LinearLayout.LayoutParams(dp(152), -1));
+            controls.addView(sideControls(false), new LinearLayout.LayoutParams(dp(152), -1));
+            body.addView(controls, new LinearLayout.LayoutParams(-1, dp(152)));
+        } else {
+            body.addView(sideControls(true), new LinearLayout.LayoutParams(dp(152), -1));
+            body.addView(display, new LinearLayout.LayoutParams(0, -1, 1));
+            body.addView(sideControls(false), new LinearLayout.LayoutParams(dp(152), -1));
+        }
         setContentView(root);
     }
 
