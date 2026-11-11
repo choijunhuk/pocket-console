@@ -17,8 +17,8 @@ BASE = {
     "src/dolphin/CommonFuncs.cpp": "b65ab444408cff3f04dfa91c5a3002f852959a3840d89da4f588d06e83a2e75e",
 }
 PATCHED = {
-    "src/libretro/libretro.cpp": "575dcd2e17f66aa60d975da83d8d26aedd846d702702d9cc14fa5b5327eb5c7f",
-    "src/NDSCart_SRAMManager.cpp": "743e4592943dec6a73323184e19d382accab154cbcfbee561e8023eef9041a80",
+    "src/libretro/libretro.cpp": "4cf979bdd3bc39f322c9143dd67153a78b7c4ffcda4fd5fdaa2f5de63d8638ca",
+    "src/NDSCart_SRAMManager.cpp": "8e0baedfe1ede93b37597e18f98c834d44bc50ffd3f71a2f72277f2f27c653ad",
     "src/dolphin/CommonFuncs.cpp": "9a03d896dbd964a3bed0da24a604c1a5851f6e6ab4a496b2b632e909bbfdabf7",
 }
 

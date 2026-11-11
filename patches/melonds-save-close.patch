@@ -1,7 +1,15 @@
 diff --git a/src/libretro/libretro.cpp b/src/libretro/libretro.cpp
 --- a/src/libretro/libretro.cpp
 +++ b/src/libretro/libretro.cpp
-@@ -927,6 +927,7 @@ bool retro_load_game(const struct retro_game_info *info)
+@@ -12,6 +12,7 @@
+ #include "Config.h"
+ #include "Platform.h"
+ #include "NDS.h"
++#include "NDSCart.h"
+ #include "NDSCart_SRAMManager.h"
+ #include "GPU.h"
+ #include "SPU.h"
+@@ -927,6 +928,7 @@ bool retro_load_game(const struct retro_game_info *info)
  
  void retro_unload_game(void)
  {
@@ -12,7 +20,7 @@ diff --git a/src/libretro/libretro.cpp b/src/libretro/libretro.cpp
 diff --git a/src/NDSCart_SRAMManager.cpp b/src/NDSCart_SRAMManager.cpp
 --- a/src/NDSCart_SRAMManager.cpp
 +++ b/src/NDSCart_SRAMManager.cpp
-@@ -65,6 +65,8 @@ void DeInit()
+@@ -65,6 +65,8 @@
          Platform::Thread_Free(FlushThread);
          FlushSecondaryBuffer();
      }
@@ -21,35 +29,6 @@ diff --git a/src/NDSCart_SRAMManager.cpp b/src/NDSCart_SRAMManager.cpp
  #endif
  
      if (SecondaryBuffer) delete SecondaryBuffer;
-@@ -160,6 +162,7 @@ void FlushSecondaryBuffer(u8* dst, s32 dstLength)
- #ifndef __LIBRETRO__
-     Platform::Mutex_Lock(SecondaryBufferLock);
- #endif
-+    bool flushed = true;
-     if (dst)
-     {
-         memcpy(dst, SecondaryBuffer, SecondaryBufferLength);
-@@ -170,12 +173,16 @@ void FlushSecondaryBuffer(u8* dst, s32 dstLength)
-         if (f)
-         {
-             printf("NDS SRAM: Written\n");
--            fwrite(SecondaryBuffer, SecondaryBufferLength, 1, f);
--            fclose(f);
-+            bool written = fwrite(SecondaryBuffer, SecondaryBufferLength, 1, f) == 1;
-+            flushed = fclose(f) == 0 && written;
-         }
-+        else flushed = false;
-     }
--    PreviousFlushVersion = FlushVersion;
--    TimeAtLastFlushRequest = 0;
-+    if (flushed)
-+    {
-+        PreviousFlushVersion = FlushVersion;
-+        TimeAtLastFlushRequest = 0;
-+    }
- #ifndef __LIBRETRO__
-     Platform::Mutex_Unlock(SecondaryBufferLock);
- #endif
 diff --git a/src/dolphin/CommonFuncs.cpp b/src/dolphin/CommonFuncs.cpp
 --- a/src/dolphin/CommonFuncs.cpp
 +++ b/src/dolphin/CommonFuncs.cpp

@@ -449,7 +449,7 @@ public final class MainActivity extends Activity {
         ConsolePreviewView art = new ConsolePreviewView(this, selected);
         page.addView(art, new LinearLayout.LayoutParams(-1, dp(selected == ConsoleType.SWITCH ? 245 : 340)));
         gap(page, 18);
-        TextView status = text("코어 연결 예정", 14, ORANGE, true);
+        TextView status = text(selected == ConsoleType.DS ? "조작 테스트" : "코어 연결 예정", 14, ORANGE, true);
         status.setPadding(dp(14), dp(12), dp(14), dp(12));
         status.setBackground(shape(Color.rgb(250, 229, 217), 12));
         page.addView(status);
