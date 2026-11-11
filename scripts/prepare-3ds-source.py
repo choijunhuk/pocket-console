@@ -26,8 +26,8 @@ def apply_pinned_patch(source: Path, patch: Path, source_path: str, base_hash: s
         raise ValueError("Azahar patch SHA256 mismatch")
     if sha256(target.read_bytes()).hexdigest() != base_hash:
         raise ValueError(f"Azahar source file SHA256 mismatch: {source_path}")
-    subprocess.run(["git", "apply", "--check", str(patch)], cwd=source, check=True)
-    subprocess.run(["git", "apply", str(patch)], cwd=source, check=True)
+    subprocess.run(["patch", "--batch", "--forward", "--dry-run", "-p1", "-i", str(patch)], cwd=source, check=True)
+    subprocess.run(["patch", "--batch", "--forward", "-p1", "-i", str(patch)], cwd=source, check=True)
     if sha256(target.read_bytes()).hexdigest() != patched_hash:
         raise ValueError(f"Azahar patched file SHA256 mismatch: {source_path}")
 

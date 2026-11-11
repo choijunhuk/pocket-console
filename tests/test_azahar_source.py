@@ -71,6 +71,7 @@ class SourcePreparationTest(unittest.TestCase):
     def test_pinned_patch_exits_after_runtime_error(self):
         import importlib.util
 
+        subprocess.run(["git", "init", "-q", str(self.dir)], check=True)
         spec = importlib.util.spec_from_file_location("prepare_azahar", SCRIPT)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
