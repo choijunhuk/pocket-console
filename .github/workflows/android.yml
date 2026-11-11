@@ -11,7 +11,10 @@ permissions:
 jobs:
   three-ds-core:
     uses: ./.github/workflows/3ds-core.yml
+  three-ds-homebrew:
+    uses: ./.github/workflows/3ds-homebrew.yml
   three-ds-host:
+    needs: three-ds-homebrew
     uses: ./.github/workflows/3ds-host-smoke.yml
   native-smoke:
     runs-on: ubuntu-latest
@@ -32,7 +35,7 @@ jobs:
           path: .cache/native-smoke/*.ppm
           if-no-files-found: warn
   verify:
-    needs: [three-ds-core, three-ds-host]
+    needs: [three-ds-core, three-ds-homebrew]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
