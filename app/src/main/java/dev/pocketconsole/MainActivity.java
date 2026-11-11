@@ -176,7 +176,9 @@ public final class MainActivity extends Activity {
         DeviceCapabilities.Compatibility check = compatibility(type);
         if (check.state == DeviceCapabilities.Compatibility.State.UNSUPPORTED) return "기기 조건 미충족";
         if (check.state == DeviceCapabilities.Compatibility.State.UNKNOWN) return "기기 조건 확인 중";
-        return type == ConsoleType.THREE_DS && !threeDsPackaged ? "엔진 준비 중" : "실행 가능";
+        if (type == ConsoleType.THREE_DS) return threeDsPackaged
+                ? "실험적 실행 · 호환성 미확인" : "엔진 준비 중";
+        return "실행 가능";
     }
 
     @Override protected void onSaveInstanceState(Bundle out) {
@@ -380,11 +382,13 @@ public final class MainActivity extends Activity {
 
     private void drawEntry(LibraryStore.Entry entry) {
         boolean canPlay = launchable(entry.console);
-        Button item = button(entry.name + "  ·  " + (canPlay ? "실행" : "준비 중"), ui.raised, INK);
+        String action = canPlay ? (entry.console == ConsoleType.THREE_DS ? "실험적 실행" : "실행") : "준비 중";
+        String accessibleAction = canPlay ? (entry.console == ConsoleType.THREE_DS
+                ? "실험적 실행, 게임 호환성 미확인" : "게임 실행") : readiness(entry.console);
+        Button item = button(entry.name + "  ·  " + action, ui.raised, INK);
         item.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
         item.setPadding(dp(16), 0, dp(16), 0);
-        item.setContentDescription(entry.name + ", " + entry.console.label + " 파일, "
-                + (canPlay ? "게임 실행" : readiness(entry.console)));
+        item.setContentDescription(entry.name + ", " + entry.console.label + " 파일, " + accessibleAction);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(60));
         params.bottomMargin = dp(8);
         page.addView(item, params);
@@ -496,7 +500,7 @@ public final class MainActivity extends Activity {
                 } else {
                     new AlertDialog.Builder(activity).setTitle("파일 접근 불가")
                             .setMessage("원본 파일이 이동했거나 읽기 권한이 해제되었어요. 목록은 유지됩니다.")
-                            .setPositiveButton("파일 다시 선택", (dialog, which) -> activity.importFile())
+                            .setPositiveButton("새 파일 가져오기", (dialog, which) -> activity.importFile())
                             .setNeutralButton("목록에서 지우기", (dialog, which) -> activity.confirmRemoval(entry))
                             .setNegativeButton("유지", null).show();
                 }

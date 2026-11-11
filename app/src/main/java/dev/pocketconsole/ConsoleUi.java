@@ -53,6 +53,10 @@ final class ConsoleUi {
                 : color == ink ? (dark ? 0xffd2d9d0 : 0xff455651)
                 : (dark ? 0xff52625e : 0xffb9c1b7);
         states.addState(new int[]{android.R.attr.state_pressed}, shape(pressed, radiusDp));
+        GradientDrawable focused = shape(color, radiusDp);
+        focused.setStroke(Math.max(2, Math.round(2 * density)),
+                color == accent ? onAccent : color == ink ? paper : ink);
+        states.addState(new int[]{android.R.attr.state_focused}, focused);
         states.addState(new int[]{}, shape(color, radiusDp));
         return new RippleDrawable(ColorStateList.valueOf(dark ? 0x66ffffff : 0x33202826), states, null);
     }

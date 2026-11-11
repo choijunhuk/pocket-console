@@ -46,6 +46,9 @@ public final class DsPlayerActivity extends Activity {
     private final Object lifecycle = new Object();
     private volatile boolean paused = true;
     private volatile boolean stopped;
+    private volatile boolean exitRequested;
+    private volatile boolean playerStarted;
+    private volatile boolean playerDone;
     private volatile boolean touchDown;
     private volatile int touchX;
     private volatile int touchY;
@@ -63,14 +66,17 @@ public final class DsPlayerActivity extends Activity {
         ui.applyBars(this);
         buildUi();
         String uri = getIntent().getStringExtra(EXTRA_ROM_URI);
-        if (uri == null) { showStatus("DS 파일 주소가 없어요."); return; }
+        if (uri == null) { showStatus("DS 파일 주소가 없어요."); playerDone = true; return; }
         if (Build.VERSION.SDK_INT >= 33) {
-            backCallback = this::finish;
+            backCallback = this::requestExit;
             getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
                     OnBackInvokedDispatcher.PRIORITY_DEFAULT, backCallback);
         }
         player = PLAYER.submit(() -> play(Uri.parse(uri)));
     }
+
+    @android.annotation.SuppressLint("GestureBackNavigation")
+    @Override public void onBackPressed() { requestExit(); }
 
     @Override protected void onResume() {
         super.onResume();
@@ -106,6 +112,19 @@ public final class DsPlayerActivity extends Activity {
             getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(backCallback);
         }
         super.onDestroy();
+    }
+
+    private void requestExit() {
+        if (exitRequested) return;
+        if (playerDone) { finish(); return; }
+        exitRequested = true;
+        stopped = true;
+        buttons.set(0);
+        touchDown = false;
+        if (inputGuard != null) inputGuard.reset();
+        showStatus("종료 중 · 게임 내 저장 마무리");
+        synchronized (lifecycle) { lifecycle.notifyAll(); }
+        if (playerStarted && player != null) player.cancel(true);
     }
 
     private int dp(float value) { return Math.round(value * getResources().getDisplayMetrics().density); }
@@ -165,8 +184,8 @@ public final class DsPlayerActivity extends Activity {
 
         LinearLayout header = row();
         Button exit = plainButton("‹  라이브러리", SHELL);
-        exit.setContentDescription("DS 게임을 저장하고 라이브러리로 돌아가기");
-        exit.setOnClickListener(v -> finish());
+        exit.setContentDescription("DS 게임을 종료하고 라이브러리로 돌아가기");
+        exit.setOnClickListener(v -> requestExit());
         header.addView(exit, new LinearLayout.LayoutParams(0, dp(48), 1));
         TextView title = text("DS  /  PLAY", 14, true);
         title.setTextColor(ORANGE);
@@ -300,9 +319,11 @@ public final class DsPlayerActivity extends Activity {
     }
 
     private void play(Uri uri) {
+        playerStarted = true;
         long token = 0;
         AudioTrack output = null;
         try {
+            if (stopped) return;
             File rom;
             try (InputStream source = getContentResolver().openInputStream(uri)) {
                 if (source == null) throw new IOException("파일을 열 수 없어요.");
@@ -316,6 +337,7 @@ public final class DsPlayerActivity extends Activity {
             }
             token = DsNative.open(rom.getAbsolutePath(), system.getAbsolutePath(), saves.getAbsolutePath());
             if (token == 0) throw new IOException("DS 코어가 게임을 열지 못했어요.");
+            if (stopped) return;
             int minimum = AudioTrack.getMinBufferSize(32768,
                     AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT);
             if (minimum <= 0) throw new IOException("오디오 장치를 열 수 없어요.");
@@ -366,14 +388,38 @@ public final class DsPlayerActivity extends Activity {
             Thread.currentThread().interrupt();
         } catch (IOException | RuntimeException | LinkageError error) {
             main.post(() -> {
-                if (!isDestroyed() && !stopped) showStatus("DS 실행 실패: " + error.getMessage());
+                if (!isDestroyed() && !exitRequested) showStatus("DS 실행 실패: " + error.getMessage());
             });
         } finally {
+            String shutdownError = null;
             try {
-                if (output != null) { output.pause(); output.flush(); output.release(); }
-            } finally {
-                if (token != 0) DsNative.close(token);
+                if (output != null) {
+                    try { output.pause(); output.flush(); }
+                    catch (RuntimeException ignored) { }
+                    output.release();
+                }
+            } catch (RuntimeException error) {
+                shutdownError = "오디오 장치를 정리하지 못했어요: " + error.getMessage();
             }
+            if (token != 0) {
+                try { DsNative.close(token); }
+                catch (Exception | LinkageError error) {
+                    shutdownError = "DS 종료 중 저장 반영에 실패했어요: " + error.getMessage();
+                }
+            }
+            String failure = shutdownError;
+            main.post(() -> {
+                if (isDestroyed()) return;
+                if (failure != null) {
+                    exitRequested = false;
+                    showStatus(failure + " 다시 나가려면 라이브러리를 누르세요.");
+                    playerDone = true;
+                } else {
+                    playerDone = true;
+                    if (!exitRequested) return;
+                    finish();
+                }
+            });
         }
     }
 }

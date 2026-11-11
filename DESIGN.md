@@ -10,9 +10,9 @@
 
 ## Product truth
 
-- Target: one local Android library with four selected systems: DS, 3DS, Switch, Switch 2. The current selector has three; Switch 2 is still to be added.
+- Target: one local Android library with four selected systems: DS, 3DS, Switch, Switch 2. All four catalog choices are implemented on the active branch.
 - DS is the currently integrated player. Its two 256 × 192 screens, touch, buttons, audio, and existing save path must keep working.
-- 3DS execution is in development. Show **실행 준비 중** until its packaged core and actual device acceptance pass. Its player uses a 400 × 240 upper screen and 320 × 240 lower touch screen.
+- 3DS execution is in development. Missing packages show **엔진 준비 중**; a packaged core on a device meeting prerequisites shows **실험적 실행 · 호환성 미확인**. Reserve unqualified readiness for actual device acceptance. Its player uses a 400 × 240 upper screen and 320 × 240 lower touch screen.
 - Switch execution is pending. Switch 2 is a separate, experimental catalog target; Hokkaido is only a candidate backend. A filename or controller preview never establishes executable support.
 - Readiness is per system and device: **실행 가능**, **엔진 준비 중**, **기기 조건 미충족**, or **실험적 지원**. State the specific unmet API, ABI, graphics, or memory prerequisite when known. Never gate by phone model or promise a frame rate or game compatibility from prerequisites alone.
 - Galaxy S23 Ultra is a reference handset for review, not a device whitelist. Other capable Android phones should work.
@@ -28,7 +28,7 @@
 
 ## Visual system
 
-- Base tokens: paper `#F3F0E8`, ink `#202826`, shell `#DADDD5`, LCD `#C8D6A3`, orange `#CC633F`. Use semantic surface/text/action/status roles in code, including a deliberate dark scheme; do not merely invert colors. Check body text at 4.5:1 and large text at 3:1 in both schemes.
+- Base tokens: paper `#F3F0E8`, ink `#202826`, shell `#DADDD5`, LCD `#C8D6A3`. Action orange is `#A34D31` with white text in light mode and `#EF9B79` with ink text in dark mode. Use semantic surface/text/action/status roles; do not merely invert colors. Check body text at 4.5:1 and large text at 3:1 in both schemes.
 - Android Views and Java 17, with no new UI runtime dependency. Keep legible system `sp` text and reserve original lettering for the Pocket Console mark. Let typographic scale, weight, and spacing carry hierarchy instead of decorative all-caps labels.
 - Use an 8 dp spacing rhythm and 20–24 dp library edges. The library should read as a list of cartridges beside one primary import action, not a stack of equally weighted cards. A small hardware illustration can identify the selected console after the list.
 - The game display is the focal plane. Frame real output inside a dark inset LCD with a subtle bevel, hinge line, and speaker detail. Do not tint or animate over game pixels. Use one short depression/release treatment on button presses; optional haptic tick follows system settings.
@@ -50,5 +50,5 @@
 
 ## Evidence and implementation boundary
 
-- Existing Android Views code supplies the warm palette, console preview, file catalog, and DS player. `docs/design/handheld-surfaces.md` gives the surface handoff. The proposed hierarchy and dark scheme are design changes, not shipped behavior.
+- Existing Android Views code supplies the warm palette, console preview, file catalog, and DS player. `docs/design/handheld-surfaces.md` gives the surface handoff. The revised hierarchy and dark scheme are implemented on the active branch; fresh rendered and physical-device acceptance remain separate from implementation.
 - Verify the actual imported-file-to-player path, DS regression, 3DS homebrew output when packaged, error recovery, and device layouts separately. A build or screenshot alone does not establish device compatibility.

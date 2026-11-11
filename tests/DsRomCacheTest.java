@@ -4,6 +4,9 @@ import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InterruptedIOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.util.Arrays;
 
@@ -59,6 +62,41 @@ public final class DsRomCacheTest {
         }, dir);
         check(dir.listFiles().length == 2, "failed copies must leave no file");
         check(Arrays.equals(first, Files.readAllBytes(a.toPath())), "failed copies must preserve cached ROM");
+        try {
+            Thread.currentThread().interrupt();
+            try { DsRomCache.copy(new ByteArrayInputStream(first), dir);
+                throw new AssertionError("interrupted copy was accepted"); }
+            catch (InterruptedIOException expected) { checks++; }
+        } finally { Thread.interrupted(); }
+        check(dir.listFiles().length == 2, "interrupted copy left a temporary file");
+        try {
+            try { DsRomCache.copy(new ByteArrayInputStream(first) {
+                private boolean interrupted;
+                @Override public synchronized int read(byte[] bytes, int offset, int size) {
+                    int count = super.read(bytes, offset, size);
+                    if (count > 0 && !interrupted) {
+                        interrupted = true;
+                        Thread.currentThread().interrupt();
+                    }
+                    return count;
+                }
+            }, dir); throw new AssertionError("midstream interruption was accepted"); }
+            catch (InterruptedIOException expected) { checks++; }
+        } finally { Thread.interrupted(); }
+        check(dir.listFiles().length == 2, "midstream interruption left a temporary file");
+        check(Arrays.equals(first, Files.readAllBytes(a.toPath())), "interrupted copy replaced valid cache");
+        Method existing = DsRomCache.class.getDeclaredMethod("valid", File.class, long.class, String.class);
+        existing.setAccessible(true);
+        try {
+            Thread.currentThread().interrupt();
+            try {
+                existing.invoke(null, a, (long) first.length, a.getName().substring(0, 64));
+                throw new AssertionError("interrupted existing-cache hash was accepted");
+            } catch (InvocationTargetException expected) {
+                check(expected.getCause() instanceof InterruptedIOException,
+                        "existing-cache interruption was swallowed");
+            }
+        } finally { Thread.interrupted(); }
         System.out.println("PASS: " + checks + " DS ROM cache checks");
     }
 

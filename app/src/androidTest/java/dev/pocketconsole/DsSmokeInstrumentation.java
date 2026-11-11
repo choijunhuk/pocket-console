@@ -70,7 +70,7 @@ public final class DsSmokeInstrumentation extends Instrumentation {
             testAudio(rom, root);
             testMalformedRom(rom, root);
             testStaleClose(rom, root);
-            testPlayerUi(rom);
+            testPlayerUi(rom, root);
             result.putString("stream", "DS_ANDROID_SMOKE_PASS cache/smoke-player.png");
             Log.i(TAG, "DS_ANDROID_SMOKE_PASS");
             finish(Activity.RESULT_OK, result);
@@ -200,7 +200,7 @@ public final class DsSmokeInstrumentation extends Instrumentation {
         require(rejected, "closed session token was accepted");
     }
 
-    private void testPlayerUi(File rom) throws Exception {
+    private void testPlayerUi(File rom, File root) throws Exception {
         Intent intent = new Intent().setClassName(getTargetContext().getPackageName(),
                 "dev.pocketconsole.DsPlayerActivity");
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -266,12 +266,41 @@ public final class DsSmokeInstrumentation extends Instrumentation {
             requireFullyVisible(buttons[1], landscape, "B control is off-screen in landscape");
             requirePlayerControls(activity, landscape);
             landscape.recycle();
+
+            testPlayerExit(activity);
+            testFreshSessionAfterExit(rom, root);
         } finally {
             if (a != null) {
                 Button button = a;
                 runOnMainSync(() -> dispatchButton(button, MotionEvent.ACTION_UP));
             }
             runOnMainSync(activity::finish);
+        }
+    }
+
+    private void testPlayerExit(Activity activity) throws Exception {
+        runOnMainSync(() -> {
+            Button exit = (Button) findText(activity.getWindow().getDecorView(), "‹  라이브러리");
+            require(exit != null, "DS library exit button missing");
+            exit.performClick();
+            require(findText(activity.getWindow().getDecorView(),
+                    "종료 중 · 게임 내 저장 마무리") != null,
+                    "DS closing status was not shown before leaving the player");
+            require(!activity.isFinishing(), "DS player finished before its closing status was visible");
+        });
+        long deadline = SystemClock.uptimeMillis() + 15000;
+        while (SystemClock.uptimeMillis() < deadline && !activity.isFinishing()) {
+            Thread.sleep(100);
+        }
+        require(activity.isFinishing(), "DS player did not finish after native close");
+    }
+
+    private void testFreshSessionAfterExit(File rom, File root) throws Exception {
+        long fresh = open(rom, root);
+        try {
+            frame(fresh, 0);
+        } finally {
+            close(fresh);
         }
     }
 
