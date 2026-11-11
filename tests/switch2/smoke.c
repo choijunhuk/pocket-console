@@ -71,7 +71,7 @@ int main(int argc, char** argv) {
         stride /= sizeof(u32);
         for (u32 y = 0; y < Height; y++) {
             for (u32 x = 0; x < Width; x++) {
-                u32 color = y < Height / 2 ? top : RGBA8_MAXALPHA(220, 0, 0);
+                u32 color = y < Height / 2 ? top : (u32)RGBA8_MAXALPHA(220, 0, 0);
                 if (audio_state != 0 && x >= Width - 40 && y < 40) {
                     color = audio_state > 0 ? RGBA8_MAXALPHA(255, 255, 255)
                                              : RGBA8_MAXALPHA(100, 100, 100);
