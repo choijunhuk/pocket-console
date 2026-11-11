@@ -1,0 +1,73 @@
+name: Switch 2 native SDK source build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/switch-backends]
+    paths:
+      - switch/native/**
+      - app/src/main/AndroidManifest.xml
+      - app/src/main/java/dev/pocketconsole/Switch2PlayerActivity.java
+      - app/src/main/java/org/yuzu/yuzu_emu/**
+      - scripts/build-switch-probe.sh
+      - scripts/build-switch-sdk.sh
+      - scripts/build-switch-sdk-objects.py
+      - scripts/test-switch-java.sh
+      - scripts/prepare-switch-source.py
+      - scripts/prepare-switch-host-tool.py
+      - third_party/switch*.lock.json
+      - tests/test_switch_sdk_hook.py
+      - tests/test_switch_sdk_objects.py
+      - tests/SwitchNativeLibraryTest.java
+      - .github/workflows/switch-sdk.yml
+
+permissions:
+  contents: read
+
+jobs:
+  pocket-switch2-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: Install pinned Android toolchain
+        run: sdkmanager 'platforms;android-36' 'ndk;28.2.13676358' 'cmake;3.31.5'
+      - name: Verify source and CMake injection
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_switch_source.py' -v
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_switch_host_tool.py' -v
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_switch_sdk_hook.py' -v
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_switch_sdk_objects.py' -v
+          ./scripts/test-switch-java.sh
+      - uses: actions/cache@v4
+        id: sdk-cache
+        with:
+          path: .cache/switch-probes/pocket-switch2-arm64-v8a
+          key: pocket-switch2-sdk-ndk28.2-cmake3.31.5-${{ hashFiles('third_party/switch*.lock.json', 'scripts/prepare-switch-source.py', 'scripts/prepare-switch-host-tool.py', 'scripts/build-switch-probe.sh', 'scripts/build-switch-sdk.sh', 'switch/native/**', 'tests/test_switch_sdk_hook.py', '.github/workflows/switch-sdk.yml') }}
+      - name: Build Pocket Console source target
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: ./scripts/build-switch-sdk.sh
+      - name: Verify native SDK artifact
+        run: |
+          cd .cache/switch-probes/pocket-switch2-arm64-v8a
+          sha256sum --check SHA256SUMS
+          test -s libpocket_switch2.so
+          test -s shared-libraries.txt
+          test -s license-files.txt
+          tar -tzf sdl-java-bootstrap.tar.gz | grep -q 'org/libsdl/app/SDL.java'
+          grep -q AArch64 probe-elf-header.txt
+          grep -q 'SONAME.*libpocket_switch2.so' probe-dynamic-section.txt
+          grep -q '(NEEDED)' probe-dynamic-section.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pocket-switch2-sdk-source-arm64
+          path: .cache/switch-probes/pocket-switch2-arm64-v8a/
+          if-no-files-found: error
