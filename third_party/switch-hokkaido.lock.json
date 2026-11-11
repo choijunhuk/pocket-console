@@ -1,0 +1,12 @@
+{
+  "name": "Hokkaido",
+  "repository": "https://github.com/pavelgajdo/Hokkaido.git",
+  "tag": "android-0.6.2",
+  "commit": "eb85a37114f492ce186a23a82ea0965e7139dcb6",
+  "abi": "arm64-v8a",
+  "min_android_api": 33,
+  "ndk": "28.2.13676358",
+  "cmake": "3.31.5",
+  "upstream_target": "yuzu-android",
+  "license": "GPL-3.0-or-later"
+}

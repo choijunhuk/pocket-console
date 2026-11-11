@@ -1,0 +1,52 @@
+name: Switch source build probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/switch-backends]
+    paths:
+      - third_party/switch*.lock.json
+      - scripts/prepare-switch-source.py
+      - scripts/build-switch-probe.sh
+      - tests/test_switch_source.py
+      - .github/workflows/switch-backends.yml
+
+permissions:
+  contents: read
+
+jobs:
+  hokkaido-source-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: Install pinned Android toolchain
+        run: sdkmanager 'ndk;28.2.13676358' 'cmake;3.31.5'
+      - name: Verify source preparation
+        run: python3 -m unittest discover -s tests -p test_switch_source.py -v
+      - uses: actions/cache@v4
+        id: probe-cache
+        with:
+          path: .cache/switch-probes/hokkaido-arm64-v8a
+          key: hokkaido-probe-ndk28.2-cmake3.31.5-${{ hashFiles('third_party/switch-hokkaido.lock.json', 'scripts/prepare-switch-source.py', 'scripts/build-switch-probe.sh') }}
+      - name: Build pinned upstream Android target
+        if: steps.probe-cache.outputs.cache-hit != 'true'
+        run: ./scripts/build-switch-probe.sh arm64-v8a
+      - name: Verify probe artifact
+        run: |
+          cd .cache/switch-probes/hokkaido-arm64-v8a
+          sha256sum --check SHA256SUMS
+          test -s hokkaido-upstream-probe.so
+          test -s shared-libraries.txt
+          test -s license-files.txt
+          grep -q 'AArch64' probe-elf-header.txt
+          grep -q '(NEEDED)' probe-dynamic-section.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hokkaido-upstream-source-probe-arm64
+          path: .cache/switch-probes/hokkaido-arm64-v8a/
+          if-no-files-found: error
