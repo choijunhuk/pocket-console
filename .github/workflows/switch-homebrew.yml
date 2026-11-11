@@ -1,0 +1,35 @@
+name: Original Switch homebrew
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/switch-backends]
+    paths:
+      - tests/switch2/**
+      - tests/test_switch_homebrew.py
+      - scripts/build-switch-homebrew.sh
+      - scripts/verify-switch-homebrew.py
+      - .github/workflows/switch-homebrew.yml
+
+permissions:
+  contents: read
+
+jobs:
+  fixture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check fixture bounds
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p test_switch_homebrew.py -v
+      - name: Build original homebrew
+        run: ./scripts/build-switch-homebrew.sh
+      - name: Record exact guest binary
+        run: sha256sum tests/switch2/smoke.nro | tee tests/switch2/smoke.nro.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: original-switch-homebrew
+          path: |
+            tests/switch2/smoke.nro
+            tests/switch2/smoke.nro.sha256
+          if-no-files-found: error
