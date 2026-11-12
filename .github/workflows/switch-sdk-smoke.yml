@@ -1,0 +1,152 @@
+name: Switch SDK ARM64 virtual smoke
+
+on:
+  push:
+    branches: [feat/switch-backends]
+    paths:
+      - tests/android-switch-sdk/**
+      - .github/workflows/switch-sdk-smoke.yml
+  workflow_dispatch:
+    inputs:
+      sdk_run_id:
+        description: Successful switch-sdk.yml run containing the verified runtime closure
+        required: false
+        default: '43094135185'
+      nro_run_id:
+        description: Successful switch-homebrew.yml run containing the original NRO
+        required: false
+        default: '43087284012'
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  virtual-arm64:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SDK_RUN_ID: ${{ inputs.sdk_run_id || '43094135185' }}
+      NRO_RUN_ID: ${{ inputs.nro_run_id || '43087284012' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve exact SDK producer source
+        id: sdk-source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$SDK_RUN_ID" =~ ^[0-9]+$ && "$NRO_RUN_ID" =~ ^[0-9]+$ ]]
+          sdk_info="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SDK_RUN_ID")"
+          nro_info="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$NRO_RUN_ID")"
+          test "$(jq -r .conclusion <<< "$sdk_info")" = success
+          test "$(jq -r .conclusion <<< "$nro_info")" = success
+          sha="$(jq -r .head_sha <<< "$sdk_info")"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "SDK_SOURCE_REF=$sha" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.sdk-source.outputs.sha }}
+          path: .cache/producer-source
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: Install Android build tools
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - uses: actions/download-artifact@v4
+        with:
+          name: pocket-switch2-sdk-source-arm64
+          run-id: ${{ env.SDK_RUN_ID }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: .cache/switch-sdk-download
+      - uses: actions/download-artifact@v4
+        with:
+          name: original-switch-homebrew
+          run-id: ${{ env.NRO_RUN_ID }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: .cache/switch-nro-download
+      - name: Verify and stage genuine SDK and homebrew
+        run: |
+          set -euo pipefail
+          sdk_manifest="$(find .cache/switch-sdk-download -name runtime-deps.json -type f -print -quit)"
+          nro="$(find .cache/switch-nro-download -name smoke.nro -type f -print -quit)"
+          nro_sum="$(find .cache/switch-nro-download -name smoke.nro.sha256 -type f -print -quit)"
+          test -n "$sdk_manifest" && test -n "$nro" && test -n "$nro_sum"
+          test "$(git -C .cache/producer-source rev-parse HEAD)" = "$SDK_SOURCE_REF"
+          test "$(cut -d' ' -f1 < "$nro_sum")" = "$(sha256sum "$nro" | cut -d' ' -f1)"
+          sdk_dir="$(dirname "$sdk_manifest")"
+          (cd "$sdk_dir" && sha256sum --check SHA256SUMS)
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/android-switch-sdk -p test_prepare.py -v
+          python3 tests/android-switch-sdk/prepare.py "$sdk_dir" "$nro" --producer .cache/producer-source
+          echo "SDK_DIR=$sdk_dir" >> "$GITHUB_ENV"
+          echo "NRO_FILE=$nro" >> "$GITHUB_ENV"
+      - name: Build isolated ARM64 APKs
+        run: ./gradlew -p tests/android-switch-sdk :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon
+      - name: Verify APK closure and test manifest
+        run: |
+          set -euo pipefail
+          apk=tests/android-switch-sdk/app/build/outputs/apk/debug/app-debug.apk
+          test_apk=tests/android-switch-sdk/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          python3 tests/android-switch-sdk/verify_apk.py "$apk" "$SDK_DIR"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" | grep "package: name='dev.pocketconsole.sdkprobe'"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump xmltree "$test_apk" AndroidManifest.xml | grep 'SwitchSdkSmokeInstrumentation'
+          unzip -Z1 "$test_apk" | grep '^assets/smoke.nro$' >/dev/null
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect
+          script: |
+            set -euo pipefail
+            apk=tests/android-switch-sdk/app/build/outputs/apk/debug/app-debug.apk
+            test_apk=tests/android-switch-sdk/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            adb shell getprop ro.product.cpu.abilist | tee switch-sdk-abilist.txt
+            adb shell getprop ro.dalvik.vm.native.bridge | tee switch-sdk-nativebridge.txt
+            grep -q arm64-v8a switch-sdk-abilist.txt
+            grep -q libndk_translation switch-sdk-nativebridge.txt
+            adb install --abi arm64-v8a "$apk"
+            adb install -t "$test_apk"
+            adb shell dumpsys package dev.pocketconsole.sdkprobe | grep -E 'primaryCpuAbi|nativeLibraryDir' | tee switch-sdk-installed-abi.txt
+            grep -q arm64-v8a switch-sdk-installed-abi.txt
+            adb shell pm list instrumentation | grep 'dev.pocketconsole.sdkprobe.test/dev.pocketconsole.SwitchSdkSmokeInstrumentation'
+            timeout 180s adb shell am instrument -w -r dev.pocketconsole.sdkprobe.test/dev.pocketconsole.SwitchSdkSmokeInstrumentation | tee switch-sdk-smoke.log
+            adb logcat -d -s PocketSwitchSdk:* > switch-sdk-logcat.txt
+            grep -q JNI_LINK_PASS switch-sdk-smoke.log
+            if grep -q NRO_FRAME_INPUT_PASS switch-sdk-smoke.log; then
+              echo NRO_FRAME_INPUT_PASS | tee switch-sdk-status.txt
+              adb exec-out run-as dev.pocketconsole.sdkprobe cat cache/switch-sdk-first-frame.png > switch-sdk-first-frame.png
+              adb exec-out run-as dev.pocketconsole.sdkprobe cat cache/switch-sdk-a-pressed.png > switch-sdk-a-pressed.png
+            elif grep -q NRO_NOT_RUN_UNSUPPORTED_GPU switch-sdk-smoke.log; then
+              echo NRO_NOT_RUN_UNSUPPORTED_GPU | tee switch-sdk-status.txt
+            else
+              echo NRO_SMOKE_FAILED_OR_UNKNOWN_GPU | tee switch-sdk-status.txt
+              exit 1
+            fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: switch-sdk-virtual-arm64-evidence
+          path: |
+            switch-sdk-abilist.txt
+            switch-sdk-nativebridge.txt
+            switch-sdk-installed-abi.txt
+            switch-sdk-smoke.log
+            switch-sdk-logcat.txt
+            switch-sdk-status.txt
+            switch-sdk-first-frame.png
+            switch-sdk-a-pressed.png
+          if-no-files-found: warn
