@@ -1,5 +1,9 @@
+set(pocket_source_dir "${POCKET_HOKKAIDO_SOURCE_DIR}")
+if(POCKET_SDK_TARGET STREQUAL "pocket_switch")
+    set(pocket_source_dir "${POCKET_EDEN_SOURCE_DIR}")
+endif()
 if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR AND
-   CMAKE_SOURCE_DIR STREQUAL POCKET_HOKKAIDO_SOURCE_DIR)
+   CMAKE_SOURCE_DIR STREQUAL pocket_source_dir)
     if(NOT IS_DIRECTORY "${POCKET_SDK_SOURCE_DIR}")
         message(FATAL_ERROR "Pocket Console SDK source directory is missing")
     endif()

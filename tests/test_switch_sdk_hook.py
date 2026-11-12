@@ -115,6 +115,27 @@ class ProjectHookTests(unittest.TestCase):
             self.assertNotIn("static EmulationSession s_instance;\n", generated)
             self.assertNotIn("s_instance.System()", generated)
 
+            eden_build = root / "eden-build"
+            eden_result = subprocess.run(
+                ["cmake", "-S", str(root), "-B", str(eden_build), "-DANDROID=ON",
+                 "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+                 f"-DCMAKE_PROJECT_INCLUDE={HOOK}",
+                 f"-DPOCKET_EDEN_SOURCE_DIR={root}",
+                 f"-DPOCKET_SDK_SOURCE_DIR={HOOK.parent}",
+                 "-DPOCKET_SDK_TARGET=pocket_switch"],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(eden_result.returncode, 0, eden_result.stdout + eden_result.stderr)
+            eden_targets = subprocess.run(
+                ["cmake", "--build", str(eden_build), "--target", "help"],
+                capture_output=True, text=True, check=True,
+            ).stdout
+            self.assertRegex(eden_targets, r"(?m)^\.\.\. pocket_switch$")
+            eden_compiled = {pathlib.Path(item["file"]).resolve() for item in
+                             json.loads((eden_build / "compile_commands.json").read_text())}
+            self.assertIn(HOOK.parent / "id_cache.cpp", eden_compiled)
+            self.assertNotIn(root / "src/common/android/id_cache.cpp", eden_compiled)
+
     def test_unreviewed_native_target_stops_before_toolchain_setup(self):
         script = HOOK.parents[2] / "scripts/build-switch-probe.sh"
         result = subprocess.run(

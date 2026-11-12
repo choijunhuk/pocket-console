@@ -11,7 +11,9 @@ import sys
 OWNED = {"id_cache.cpp", "software_keyboard.cpp", "emu_window.cpp", "first_frame.cpp"}
 
 
-def object_targets(commands, source_dir, build_dir):
+def object_targets(commands, source_dir, build_dir, target="pocket_switch2"):
+    if target not in {"pocket_switch2", "pocket_switch"}:
+        raise ValueError("Unreviewed Pocket Console native target")
     source_dir = Path(source_dir).resolve()
     build_dir = Path(build_dir).resolve()
     generated = build_dir / "pocket-switch-sdk/native.cpp"
@@ -28,7 +30,7 @@ def object_targets(commands, source_dir, build_dir):
         if not output.is_absolute():
             output = Path(entry["directory"]) / output
         output = output.resolve()
-        if not output.is_relative_to(build_dir) or "pocket_switch2.dir" not in str(output):
+        if not output.is_relative_to(build_dir) or f"{target}.dir" not in output.parts:
             raise ValueError(f"Object outside Pocket Console target: {source.name}")
         selected[source] = str(output.relative_to(build_dir))
     if {file.name for file in selected} != OWNED | {"native.cpp"}:
@@ -37,8 +39,9 @@ def object_targets(commands, source_dir, build_dir):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 5:
-        raise SystemExit("usage: build-switch-sdk-objects.py compile_commands.json sdk_source build_dir ninja")
-    commands, source, build, ninja = sys.argv[1:]
-    targets = object_targets(commands, source, build)
+    if len(sys.argv) not in (5, 6):
+        raise SystemExit("usage: build-switch-sdk-objects.py compile_commands.json sdk_source build_dir ninja [target]")
+    commands, source, build, ninja = sys.argv[1:5]
+    target = sys.argv[5] if len(sys.argv) == 6 else "pocket_switch2"
+    targets = object_targets(commands, source, build, target)
     subprocess.run([ninja, "-C", build, "-j", "2", *targets], check=True)

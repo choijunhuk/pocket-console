@@ -1,0 +1,93 @@
+name: Switch 1 Pocket Console native SDK source
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/switch1-eden]
+    paths:
+      - switch/native/**
+      - scripts/build-switch-sdk-objects.py
+      - scripts/build-switch1-sdk.sh
+      - scripts/build-switch-probe.sh
+      - scripts/build-switch1-probe.sh
+      - scripts/prepare-switch-source.py
+      - scripts/prepare-switch-host-tool.py
+      - third_party/switch-eden.lock.json
+      - third_party/switch-glslang.lock.json
+      - tests/test_switch_sdk_hook.py
+      - tests/test_switch_sdk_objects.py
+      - tests/test_switch_eden_sdk.py
+      - tests/SwitchNativeLibraryTest.java
+      - app/src/main/java/org/yuzu/yuzu_emu/**
+      - app/src/main/java/dev/pocketconsole/Switch2PlayerActivity.java
+      - .github/workflows/switch1-eden-sdk.yml
+
+permissions:
+  contents: read
+
+jobs:
+  pocket-switch1-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: Install pinned Android toolchain
+        run: sdkmanager 'platforms;android-36' 'ndk;30.0.16248370' 'cmake;3.31.6'
+      - name: Verify source, CMake and Java boundaries
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_switch_source.py' -v
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_switch_eden_source.py' -v
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_switch_host_tool.py' -v
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_switch_sdk_hook.py' -v
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_switch_sdk_objects.py' -v
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_switch_eden_sdk.py' -v
+          ./scripts/test-switch-java.sh
+      - uses: actions/cache@v4
+        id: sdk-cache
+        with:
+          path: .cache/switch-probes/pocket-switch-arm64-v8a
+          key: eden-pocket-switch-ndk30.0.16248370-cmake3.31.6-${{ hashFiles('third_party/switch-eden.lock.json', 'third_party/switch-glslang.lock.json', 'scripts/prepare-switch-source.py', 'scripts/prepare-switch-host-tool.py', 'scripts/build-switch-probe.sh', 'scripts/build-switch1-probe.sh', 'scripts/build-switch-sdk-objects.py', 'scripts/build-switch1-sdk.sh', 'switch/native/**', '.github/workflows/switch1-eden-sdk.yml') }}
+      - name: Build Pocket Console Eden native target
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: ./scripts/build-switch1-sdk.sh
+      - name: Inspect native ELF files after failed build
+        if: failure()
+        run: |
+          readelf="$ANDROID_SDK_ROOT/ndk/30.0.16248370/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+          for binary in \
+            .cache/eden-build/arm64-v8a/src/android/app/src/main/jni/libyuzu-android.so \
+            .cache/eden-build/arm64-v8a/pocket-switch-sdk/libpocket_switch.so; do
+            if test -s "$binary"; then
+              ls -lh "$binary"
+              "$readelf" -h "$binary"
+            fi
+          done
+      - name: Verify own ELF, SDL source and license inventory
+        run: |
+          cd .cache/switch-probes/pocket-switch-arm64-v8a
+          sha256sum --check SHA256SUMS
+          test -s libpocket_switch.so
+          test -s shared-libraries.txt
+          test -s license-files.txt
+          test -s sdl-java-bootstrap.tar.gz
+          test -s sdl-java-sha256.txt
+          test -s cxx-runtime-sha256.txt
+          test -s pocket-native-source.cpp
+          grep -q AArch64 probe-elf-header.txt
+          grep -q 'SONAME.*libpocket_switch.so' probe-dynamic-section.txt
+          grep -q '(NEEDED)' probe-dynamic-section.txt
+          grep -q LICENSE.txt license-files.txt
+          grep -E '(SONAME|NEEDED)' probe-dynamic-section.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pocket-switch1-sdk-source-arm64
+          path: .cache/switch-probes/pocket-switch-arm64-v8a/
+          if-no-files-found: error

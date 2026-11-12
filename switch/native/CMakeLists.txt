@@ -1,6 +1,14 @@
 if(NOT ANDROID OR NOT TARGET yuzu-android)
     message(FATAL_ERROR "Pocket Switch 2 SDK requires the pinned Android native target")
 endif()
+if(NOT POCKET_SDK_TARGET)
+    set(pocket_sdk_target pocket_switch2)
+elseif(POCKET_SDK_TARGET STREQUAL "pocket_switch" OR
+       POCKET_SDK_TARGET STREQUAL "pocket_switch2")
+    set(pocket_sdk_target "${POCKET_SDK_TARGET}")
+else()
+    message(FATAL_ERROR "Unreviewed Pocket Console native target")
+endif()
 
 get_target_property(upstream_sources yuzu-android SOURCES)
 get_target_property(upstream_source_dir yuzu-android SOURCE_DIR)
@@ -59,29 +67,29 @@ foreach(property SOURCES INTERFACE_SOURCES)
 endforeach()
 set_target_properties(yuzu-android PROPERTIES EXCLUDE_FROM_ALL TRUE)
 
-add_library(pocket_switch2 SHARED ${sdk_sources}
+add_library(${pocket_sdk_target} SHARED ${sdk_sources}
     "${CMAKE_CURRENT_LIST_DIR}/id_cache.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/emu_window.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/first_frame.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/software_keyboard.cpp")
-target_include_directories(pocket_switch2 BEFORE PRIVATE
+target_include_directories(${pocket_sdk_target} BEFORE PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}"
     "${CMAKE_SOURCE_DIR}/src/common/android"
     "${upstream_source_dir}"
     "${CMAKE_SOURCE_DIR}/src/android/app/src/main")
 get_target_property(upstream_includes yuzu-android INCLUDE_DIRECTORIES)
 if(upstream_includes)
-    target_include_directories(pocket_switch2 PRIVATE ${upstream_includes})
+    target_include_directories(${pocket_sdk_target} PRIVATE ${upstream_includes})
 endif()
 get_target_property(upstream_definitions yuzu-android COMPILE_DEFINITIONS)
 if(upstream_definitions)
-    target_compile_definitions(pocket_switch2 PRIVATE ${upstream_definitions})
+    target_compile_definitions(${pocket_sdk_target} PRIVATE ${upstream_definitions})
 endif()
 get_target_property(upstream_options yuzu-android COMPILE_OPTIONS)
 if(upstream_options)
-    target_compile_options(pocket_switch2 PRIVATE ${upstream_options})
+    target_compile_options(${pocket_sdk_target} PRIVATE ${upstream_options})
 endif()
-target_link_libraries(pocket_switch2 PRIVATE ${upstream_links})
-target_link_options(pocket_switch2 PRIVATE "-Wl,-Bsymbolic")
-set_target_properties(pocket_switch2 PROPERTIES
+target_link_libraries(${pocket_sdk_target} PRIVATE ${upstream_links})
+target_link_options(${pocket_sdk_target} PRIVATE "-Wl,-Bsymbolic")
+set_target_properties(${pocket_sdk_target} PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/pocket-switch-sdk")
