@@ -102,7 +102,7 @@ if [[ ${#binaries[@]} -ne 1 ]]; then
   echo "Expected one $binary_name, found ${#binaries[@]}" >&2
   exit 1
 fi
-"$readelf" -h "${binaries[0]}" | grep -q 'AArch64'
+"$readelf" -h "${binaries[0]}" | grep 'AArch64' >/dev/null
 
 mkdir -p "$(dirname "$output_dir")"
 stage="$(mktemp -d "$(dirname "$output_dir")/.hokkaido-$abi.XXXXXX")"
@@ -121,7 +121,7 @@ cp "$build_dir/CMakeCache.txt" "$stage/CMakeCache.txt"
 if [[ "$target" == pocket_switch2 ]]; then
   cp "$build_dir/pocket-switch-sdk/native.cpp" "$stage/pocket-native-source.cpp"
   tar -C "$sdl_java" -czf "$stage/sdl-java-bootstrap.tar.gz" org/libsdl/app
-  tar -tzf "$stage/sdl-java-bootstrap.tar.gz" | grep -q 'org/libsdl/app/SDL.java'
+  tar -tzf "$stage/sdl-java-bootstrap.tar.gz" | grep -F 'org/libsdl/app/SDL.java' >/dev/null
 elif [[ "$backend" == eden ]]; then
   sdl_java="$source_dir/externals/generated/sdl/java"
   if [[ ! -f "$sdl_java/org/libsdl/app/SDL.java" ]]; then

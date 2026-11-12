@@ -42,6 +42,16 @@ jobs:
       - name: Build exact Eden Android source
         if: steps.eden-cache.outputs.cache-hit != 'true'
         run: ./scripts/build-switch1-probe.sh
+      - name: Diagnose original ELF after failed probe
+        if: failure()
+        run: |
+          binary=.cache/eden-build/arm64-v8a/src/android/app/src/main/jni/libyuzu-android.so
+          if test -s "$binary"; then
+            ls -lh "$binary"
+            "${ANDROID_SDK_ROOT:-$ANDROID_HOME}/ndk/30.0.16248370/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" -h "$binary"
+          else
+            echo "Original Eden ELF was not linked"
+          fi
       - name: Verify architecture, dependencies and source notices
         run: |
           cd .cache/switch-probes/eden-arm64-v8a
