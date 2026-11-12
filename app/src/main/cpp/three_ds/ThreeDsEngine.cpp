@@ -125,7 +125,6 @@ struct Session {
 #endif
     GLuint framebuffer = 0;
     GLuint color = 0;
-    GLuint depthStencil = 0;
     std::vector<uint8_t> readback;
 };
 
@@ -385,6 +384,7 @@ bool environment(unsigned command, void* data) {
             if (callback->context_type != RETRO_HW_CONTEXT_OPENGL_CORE ||
                 callback->version_major != 4 || callback->version_minor != 3) return false;
 #endif
+            if (callback->depth || callback->stencil) return false;
             callback->get_current_framebuffer = []() -> uintptr_t { return g_session->framebuffer; };
             callback->get_proc_address = [](const char* name) -> retro_proc_address_t {
 #ifdef __ANDROID__
@@ -528,11 +528,6 @@ void createGraphics(Session& session) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, session.color, 0);
-    glGenRenderbuffers(1, &session.depthStencil);
-    glBindRenderbuffer(GL_RENDERBUFFER, session.depthStencil);
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, kWidth, kHeight);
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER,
-                              session.depthStencil);
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
         throw std::runtime_error("3DS framebuffer is incomplete");
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -544,7 +539,6 @@ void destroyGraphics(Session& session) {
     if (session.display == EGL_NO_DISPLAY) return;
     if (session.context != EGL_NO_CONTEXT && session.surface != EGL_NO_SURFACE)
         eglMakeCurrent(session.display, session.surface, session.surface, session.context);
-    if (session.depthStencil) glDeleteRenderbuffers(1, &session.depthStencil);
     if (session.color) glDeleteTextures(1, &session.color);
     if (session.framebuffer) glDeleteFramebuffers(1, &session.framebuffer);
     eglMakeCurrent(session.display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
@@ -563,7 +557,6 @@ void destroyGraphics(Session& session) {
         }
     }
     if (current) {
-        if (session.depthStencil) glDeleteRenderbuffers(1, &session.depthStencil);
         if (session.color) glDeleteTextures(1, &session.color);
         if (session.framebuffer) glDeleteFramebuffers(1, &session.framebuffer);
     }

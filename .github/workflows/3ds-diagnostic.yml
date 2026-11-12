@@ -6,6 +6,7 @@ on:
     branches: [feat/3ds-emulation]
     paths:
       - .github/workflows/3ds-diagnostic.yml
+      - app/src/main/cpp/three_ds/**
 
 permissions:
   contents: read
