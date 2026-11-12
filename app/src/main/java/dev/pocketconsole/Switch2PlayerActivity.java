@@ -39,6 +39,7 @@ public final class Switch2PlayerActivity extends Activity
         implements SurfaceHolder.Callback, NativeLibrary.Listener {
     public static final String EXTRA_GAME_PATH = "switch2_game_path";
     private static final ExecutorService SESSION = Executors.newSingleThreadExecutor();
+    private static final ExecutorService CONTROL = Executors.newSingleThreadExecutor();
     private static boolean systemInitialized;
 
     private ConsoleUi ui;
@@ -54,6 +55,8 @@ public final class Switch2PlayerActivity extends Activity
     private volatile boolean surfaceReady;
     private volatile boolean sessionDone;
     private volatile String failure;
+    private final SwitchSessionStop stop = new SwitchSessionStop(
+            CONTROL, NativeLibrary::requestPocketStop, NativeLibrary::haltPocketSession);
     private boolean started;
     private volatile int nextProgram = -1;
     private final Set<Integer> held = new HashSet<>();
@@ -102,23 +105,22 @@ public final class Switch2PlayerActivity extends Activity
 
     @Override protected void onPause() {
         releaseInputs();
-        if (backendReady && NativeLibrary.isRunning()) NativeLibrary.pauseEmulation();
+        if (backendReady && !ending) stop.control(NativeLibrary::pausePocketSession);
         super.onPause();
     }
 
     @Override protected void onResume() {
         super.onResume();
-        if (backendReady && surfaceReady && !ending && NativeLibrary.isRunning()) {
-            NativeLibrary.unpauseEmulation();
-        }
+        if (backendReady && surfaceReady && !ending)
+            stop.control(NativeLibrary::unpausePocketSession);
     }
 
     @Override protected void onDestroy() {
         ending = true;
         userExit = true;
-        SoftwareKeyboard.cancelOutstanding();
+        SoftwareKeyboard.cancelOutstanding(this);
+        stop.request();
         releaseInputs();
-        if (backendReady) NativeLibrary.stopEmulation();
         NativeLibrary.detach(this);
         if (Build.VERSION.SDK_INT >= 33 && backCallback != null) {
             getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(backCallback);
@@ -133,17 +135,18 @@ public final class Switch2PlayerActivity extends Activity
     private void requestExit() {
         if (ending) {
             userExit = true;
+            SoftwareKeyboard.cancelOutstanding(this);
+            stop.request();
             if (sessionDone || !started) finish();
-            else if (backendReady) NativeLibrary.stopEmulation();
             return;
         }
         ending = true;
         userExit = true;
+        stop.request();
         releaseInputs();
-        SoftwareKeyboard.cancelOutstanding();
+        SoftwareKeyboard.cancelOutstanding(this);
         message("종료 중 · 게임 내 저장 마무리");
-        if (backendReady) NativeLibrary.stopEmulation();
-        else if (!started) finish();
+        if (!started) finish();
     }
 
     @Override public void surfaceCreated(SurfaceHolder holder) {
@@ -154,19 +157,20 @@ public final class Switch2PlayerActivity extends Activity
     }
 
     @Override public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
-        if (backendReady && !ending && NativeLibrary.isRunning()) NativeLibrary.refreshSurface();
+        if (backendReady && !ending) stop.control(NativeLibrary::refreshPocketSurface);
     }
 
     @Override public void surfaceDestroyed(SurfaceHolder holder) {
         surfaceReady = false;
         releaseInputs();
+        SoftwareKeyboard.cancelOutstanding(this);
         if (started && !ending) {
             // shortcut: surface loss ends play, implement a GPU-safe swap before resuming a session.
             ending = true;
             failure = "화면 연결이 끊겨 게임을 종료했어요. 다시 실행해 주세요.";
             message(failure);
-            if (backendReady) NativeLibrary.stopEmulation();
         }
+        if (started) stop.request();
     }
 
     private void runSession(Surface surface) {
@@ -174,6 +178,7 @@ public final class Switch2PlayerActivity extends Activity
         try {
             NativeLibrary.initialize(this, "pocket_switch2");
             NativeLibrary.setAppDirectory(userRoot.getAbsolutePath());
+            if (!stop.arm(NativeLibrary::resetPocketStopRequest)) return;
             backendReady = true;
             if (ending || !surfaceReady || !surface.isValid()) return;
             NativeLibrary.initializeGpuDriver(
@@ -198,13 +203,21 @@ public final class Switch2PlayerActivity extends Activity
                 }
             } while (program >= 0 && !ending && surfaceReady);
         } catch (Exception | LinkageError error) {
+            ending = true;
+            stop.request();
             failure = "Switch 2 코어를 시작하지 못했어요. 기기와 파일을 확인하세요.";
             runOnUiThread(() -> message(failure));
         } finally {
+            ending = true;
+            SoftwareKeyboard.cancelOutstanding(this);
             if (inputReady) NativeInput.resetPocketState();
             if (nativeSurface) NativeLibrary.surfaceDestroyed();
+            inputReady = false;
+            backendReady = false;
+            stop.finish();
             sessionDone = true;
             runOnUiThread(() -> {
+                releaseInputs();
                 if (userExit) finish();
                 else if (failure != null) message(failure);
                 else if (!presented) message("게임 화면이 표시되지 않았어요. 파일과 그래픽을 확인하세요.");
@@ -214,6 +227,7 @@ public final class Switch2PlayerActivity extends Activity
     }
 
     @Override public Context context() { return this; }
+    @Override public boolean isEnding() { return ending; }
 
     @Override public void onLoaded() {
         runOnUiThread(() -> {
@@ -233,6 +247,8 @@ public final class Switch2PlayerActivity extends Activity
             failure = "게임 실행이 멈췄어요. 파일과 기기를 확인하세요.";
             nextProgram = -1;
             ending = true;
+            SoftwareKeyboard.cancelOutstanding(this);
+            stop.request();
         }
         runOnUiThread(() -> {
             if (userExit) finish();
@@ -254,7 +270,8 @@ public final class Switch2PlayerActivity extends Activity
             failure = reason;
             message(reason);
             ending = true;
-            if (backendReady) NativeLibrary.stopEmulation();
+            SoftwareKeyboard.cancelOutstanding(this);
+            stop.request();
         });
     }
 
@@ -392,11 +409,11 @@ public final class Switch2PlayerActivity extends Activity
         button.setContentDescription(description);
         if (id >= 0) {
             button.setOnClickListener(view -> {
-                if (!presented || ending || held.contains(id) || !NativeLibrary.isRunning()) return;
+                if (!presented || ending || !inputReady || sessionDone || held.contains(id)) return;
                 NativeInput.button(id, true);
                 view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
                 view.postDelayed(() -> {
-                    if (!held.contains(id) && backendReady && NativeLibrary.isRunning()) {
+                    if (!held.contains(id) && inputReady && !sessionDone && !ending) {
                         NativeInput.button(id, false);
                     }
                 }, 80);
@@ -404,7 +421,7 @@ public final class Switch2PlayerActivity extends Activity
             button.setOnTouchListener((view, event) -> {
                 int action = event.getActionMasked();
                 if (action == MotionEvent.ACTION_DOWN) {
-                    if (!presented || ending) return true;
+                    if (!presented || ending || !inputReady || sessionDone) return true;
                     held.add(id);
                     pressedControls.add(view);
                     view.setPressed(true);
@@ -424,7 +441,7 @@ public final class Switch2PlayerActivity extends Activity
     }
 
     private boolean surfaceTouch(View view, MotionEvent event) {
-        if (!presented || ending) return true;
+        if (!presented || ending || !inputReady || sessionDone) return true;
         int action = event.getActionMasked();
         int index = event.getActionIndex();
         if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN) {
@@ -444,7 +461,7 @@ public final class Switch2PlayerActivity extends Activity
     }
 
     private void releaseInputs() {
-        if (backendReady && NativeLibrary.isRunning()) {
+        if (inputReady && !sessionDone) {
             for (int id : held) NativeInput.button(id, false);
             for (int id : touches) NativeInput.onTouchReleased(id);
             NativeInput.stick(NativeInput.LEFT_STICK, 0f, 0f);
@@ -492,7 +509,7 @@ public final class Switch2PlayerActivity extends Activity
         @Override public boolean onTouchEvent(MotionEvent event) {
             int action = event.getActionMasked();
             if (action == MotionEvent.ACTION_DOWN) {
-                if (!presented || ending) return true;
+                if (!presented || ending || !inputReady || sessionDone) return true;
                 active = true;
                 guard.hold(this);
                 performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);

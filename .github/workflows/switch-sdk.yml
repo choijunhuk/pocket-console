@@ -8,11 +8,13 @@ on:
       - switch/native/**
       - app/src/main/AndroidManifest.xml
       - app/src/main/java/dev/pocketconsole/Switch2PlayerActivity.java
+      - app/src/main/java/dev/pocketconsole/SwitchSessionStop.java
       - app/src/main/java/org/yuzu/yuzu_emu/**
       - scripts/build-switch-probe.sh
       - scripts/build-switch-sdk.sh
       - scripts/build-switch-sdk-objects.py
       - scripts/stage-switch-sdk-runtime.py
+      - scripts/verify-switch-source-cache.py
       - scripts/test-switch-java.sh
       - scripts/prepare-switch-source.py
       - scripts/prepare-switch-host-tool.py
@@ -20,7 +22,13 @@ on:
       - tests/test_switch_sdk_hook.py
       - tests/test_switch_sdk_objects.py
       - tests/test_switch_sdk_runtime.py
+      - tests/test_switch_stop_gate.py
+      - tests/test_switch_source_cache.py
+      - tests/test_switch_ui_jni_boundary.py
+      - tests/native/switch_stop_gate.cpp
       - tests/SwitchNativeLibraryTest.java
+      - tests/SwitchSessionStopTest.java
+      - tests/SwitchKeyboardRequestTest.java
       - .github/workflows/switch-sdk.yml
 
 permissions:
@@ -49,15 +57,41 @@ jobs:
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_switch_sdk_hook.py' -v
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_switch_sdk_objects.py' -v
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_switch_sdk_runtime.py' -v
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_switch_stop_gate.py' -v
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_switch_source_cache.py' -v
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_switch_ui_jni_boundary.py' -v
           ./scripts/test-switch-java.sh
       - uses: actions/cache@v4
         id: sdk-cache
         with:
           path: .cache/switch-probes/pocket-switch2-arm64-v8a
           key: pocket-switch2-sdk-ndk28.2-cmake3.31.5-${{ hashFiles('third_party/switch*.lock.json', 'scripts/prepare-switch-source.py', 'scripts/prepare-switch-host-tool.py', 'scripts/build-switch-probe.sh', 'scripts/build-switch-sdk.sh', 'scripts/stage-switch-sdk-runtime.py', 'switch/native/**', 'tests/test_switch_sdk_hook.py', '.github/workflows/switch-sdk.yml') }}
-      - name: Build Pocket Console source target
+      - uses: actions/cache/restore@v4
+        id: native-build-cache
         if: steps.sdk-cache.outputs.cache-hit != 'true'
-        run: ./scripts/build-switch-sdk.sh
+        with:
+          path: |
+            .cache/hokkaido-source
+            .cache/hokkaido-build/arm64-v8a
+          key: pocket-switch2-build-linux-ndk28.2-cmake3.31.5-${{ hashFiles('third_party/switch*.lock.json', 'scripts/prepare-switch-source.py', 'scripts/prepare-switch-host-tool.py') }}-${{ hashFiles('switch/native/**', 'scripts/build-switch-probe.sh', 'scripts/build-switch-sdk-objects.py') }}
+          restore-keys: |
+            pocket-switch2-build-linux-ndk28.2-cmake3.31.5-${{ hashFiles('third_party/switch*.lock.json', 'scripts/prepare-switch-source.py', 'scripts/prepare-switch-host-tool.py') }}-
+      - name: Link Pocket Console native SDK
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: POCKET_SDK_BUILD_PHASE=link ./scripts/build-switch-sdk.sh
+      - name: Verify public source cache
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: python3 scripts/verify-switch-source-cache.py .cache/hokkaido-source .cache/hokkaido-build/arm64-v8a
+      - uses: actions/cache/save@v4
+        if: steps.sdk-cache.outputs.cache-hit != 'true' && steps.native-build-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            .cache/hokkaido-source
+            .cache/hokkaido-build/arm64-v8a
+          key: ${{ steps.native-build-cache.outputs.cache-primary-key }}
+      - name: Package Pocket Console native SDK
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: POCKET_SDK_BUILD_PHASE=package ./scripts/build-switch-sdk.sh
       - name: Verify native SDK artifact
         run: |
           cd .cache/switch-probes/pocket-switch2-arm64-v8a

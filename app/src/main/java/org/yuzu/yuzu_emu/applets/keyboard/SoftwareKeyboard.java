@@ -8,7 +8,6 @@ import android.text.InputFilter;
 import android.text.InputType;
 import android.widget.EditText;
 
-import java.lang.ref.WeakReference;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -36,13 +35,50 @@ public final class SoftwareKeyboard {
         }
     }
 
-    private static volatile WeakReference<AlertDialog> activeDialog = new WeakReference<>(null);
+    static final class Pending {
+        final Object owner;
+        private final CountDownLatch finished = new CountDownLatch(1);
+        private final AtomicBoolean done = new AtomicBoolean();
+        private volatile KeyboardData answer = new KeyboardData(1, "");
+
+        Pending(Object owner) { this.owner = owner; }
+
+        boolean mayShow() { return !done.get(); }
+
+        boolean complete(int result, String text) {
+            if (!done.compareAndSet(false, true)) return false;
+            answer = new KeyboardData(result, text);
+            finished.countDown();
+            return true;
+        }
+
+        boolean cancel() { return complete(1, ""); }
+
+        KeyboardData await() throws InterruptedException {
+            finished.await();
+            return answer;
+        }
+    }
+
+    private static final class Showing {
+        final Object owner;
+        final AlertDialog dialog;
+
+        Showing(Object owner, AlertDialog dialog) {
+            this.owner = owner;
+            this.dialog = dialog;
+        }
+    }
+
+    static final AtomicReference<Pending> activeRequest = new AtomicReference<>();
+    private static final AtomicReference<Showing> activeDialog = new AtomicReference<>();
     private SoftwareKeyboard() {}
 
     public static KeyboardData executeNormal(KeyboardConfig config) {
         NativeLibrary.Listener owner = NativeLibrary.activeListener();
         KeyboardData cancelled = new KeyboardData(1, "");
-        if (owner == null || !(owner.context() instanceof Activity)) return cancelled;
+        if (owner == null || owner.isEnding() || !(owner.context() instanceof Activity))
+            return cancelled;
         Activity activity = (Activity) owner.context();
         if (activity.isFinishing() || activity.isDestroyed()
                 || Looper.myLooper() == Looper.getMainLooper()) return cancelled;
@@ -53,19 +89,23 @@ public final class SoftwareKeyboard {
             return cancelled;
         }
 
-        CountDownLatch finished = new CountDownLatch(1);
-        AtomicBoolean done = new AtomicBoolean();
-        AtomicReference<KeyboardData> answer = new AtomicReference<>(cancelled);
+        Pending pending = new Pending(owner);
+        Pending previous = activeRequest.getAndSet(pending);
+        if (previous != null) previous.cancel();
+        Showing previousDialog = activeDialog.getAndSet(null);
+        if (previousDialog != null) activity.runOnUiThread(previousDialog.dialog::dismiss);
+        if (owner.isEnding()) pending.cancel();
         activity.runOnUiThread(() -> {
-            if (activity.isFinishing() || activity.isDestroyed()) {
-                finished.countDown();
+            if (activeRequest.get() != pending || !pending.mayShow() || owner.isEnding()
+                    || activity.isFinishing() || activity.isDestroyed()) {
+                pending.cancel();
                 return;
             }
             int maximum = config.max_text_length > 0
                     ? Math.min(config.max_text_length, 4096) : 4096;
             if (config.min_text_length > maximum) {
                 NativeLibrary.unsupportedApplet("게임 키보드 입력 길이 제한");
-                finished.countDown();
+                pending.cancel();
                 return;
             }
             EditText input = new EditText(activity);
@@ -88,22 +128,20 @@ public final class SoftwareKeyboard {
                             ? "확인" : config.ok_text, null);
             if (config.disable_cancel_button) {
                 builder.setNeutralButton("게임 종료", (dialog, which) -> {
-                    if (done.compareAndSet(false, true)) finished.countDown();
-                    NativeLibrary.unsupportedApplet("사용자가 게임을 종료했어요");
+                    if (pending.cancel())
+                        NativeLibrary.unsupportedApplet("사용자가 게임을 종료했어요");
                 });
             } else {
-                builder.setNegativeButton("취소", (dialog, which) -> {
-                    if (done.compareAndSet(false, true)) finished.countDown();
-                });
+                builder.setNegativeButton("취소", (dialog, which) -> pending.cancel());
             }
             AlertDialog dialog = builder.create();
             dialog.setCancelable(!config.disable_cancel_button);
-            dialog.setOnCancelListener(ignored -> {
-                if (done.compareAndSet(false, true)) finished.countDown();
-            });
+            dialog.setOnCancelListener(ignored -> pending.cancel());
             dialog.setOnDismissListener(ignored -> {
-                if (done.compareAndSet(false, true)) finished.countDown();
-                activeDialog = new WeakReference<>(null);
+                pending.cancel();
+                Showing showing = activeDialog.get();
+                if (showing != null && showing.dialog == dialog)
+                    activeDialog.compareAndSet(showing, null);
             });
             dialog.setOnShowListener(ignored ->
                     dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
@@ -112,19 +150,26 @@ public final class SoftwareKeyboard {
                             input.setError("최소 " + config.min_text_length + "자");
                             return;
                         }
-                        answer.set(new KeyboardData(0, text));
-                        if (done.compareAndSet(false, true)) finished.countDown();
+                        pending.complete(0, text);
                         dialog.dismiss();
                     }));
-            activeDialog = new WeakReference<>(dialog);
+            Showing showing = new Showing(owner, dialog);
+            activeDialog.set(showing);
+            if (activeRequest.get() != pending || !pending.mayShow() || owner.isEnding()) {
+                activeDialog.compareAndSet(showing, null);
+                pending.cancel();
+                return;
+            }
             dialog.show();
         });
         try {
-            finished.await();
-            return answer.get();
+            return pending.await();
         } catch (InterruptedException interrupted) {
+            pending.cancel();
             Thread.currentThread().interrupt();
             return cancelled;
+        } finally {
+            activeRequest.compareAndSet(pending, null);
         }
     }
 
@@ -132,10 +177,14 @@ public final class SoftwareKeyboard {
         NativeLibrary.unsupportedApplet("이 게임의 화면 내 키보드는 아직 지원되지 않아요");
     }
 
-    public static void cancelOutstanding() {
-        AlertDialog dialog = activeDialog.get();
-        if (dialog == null) return;
-        if (Looper.myLooper() == Looper.getMainLooper()) dialog.dismiss();
-        else new Handler(Looper.getMainLooper()).post(dialog::dismiss);
+    public static void cancelOutstanding(Object owner) {
+        Pending pending = activeRequest.get();
+        if (pending != null && pending.owner == owner
+                && activeRequest.compareAndSet(pending, null)) pending.cancel();
+        Showing showing = activeDialog.get();
+        if (showing == null || showing.owner != owner
+                || !activeDialog.compareAndSet(showing, null)) return;
+        if (Looper.myLooper() == Looper.getMainLooper()) showing.dialog.dismiss();
+        else new Handler(Looper.getMainLooper()).post(showing.dialog::dismiss);
     }
 }

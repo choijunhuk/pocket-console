@@ -71,10 +71,37 @@ class ProjectHookTests(unittest.TestCase):
             )
             (root / "src/common/common.cpp").write_text("void common_code() {}\n")
             (root / "src/android/app/src/main/jni/native.cpp").write_text(
-                "struct EmulationSession { int System() { return 0; } };\n"
-                "static EmulationSession s_instance;\n"
-                "EmulationSession& getInstance() { return s_instance; }\n"
-                "void multiplayer() { s_instance.System(); }\n"
+                """struct EmulationSession { int System() { return 0; } };
+static EmulationSession s_instance;
+EmulationSession& getInstance() { return s_instance; }
+void multiplayer() { s_instance.System(); }
+void EmulationSession::SurfaceChanged() {
+    if (!IsRunning()) {
+        return;
+    }
+    m_window->OnSurfaceChanged(m_native_window);
+}
+void Java_org_yuzu_yuzu_1emu_NativeLibrary_stopEmulation(JNIEnv* env, jclass clazz) {
+    EmulationSession::GetInstance().HaltEmulation();
+}
+void EmulationSession::RunEmulation() {
+    {
+        std::scoped_lock lock(m_mutex);
+        m_is_running = true;
+    }
+    void(m_system.Run());
+}
+static int RunEmulation() {
+    SCOPE_EXIT {
+        EmulationSession::GetInstance().ShutdownEmulation();
+    };
+}
+void waitLoop() {
+                    return !m_is_running || m_pending_shader_cache_title.has_value();
+                })) {
+                if (!m_is_running) {
+}
+"""
             )
             (root / "src/android/app/src/main/jni/CMakeLists.txt").write_text(
                 "add_library(yuzu-android SHARED native.cpp)\n"
@@ -114,6 +141,11 @@ class ProjectHookTests(unittest.TestCase):
             self.assertIn("EmulationSession::GetInstance().System()", generated)
             self.assertNotIn("static EmulationSession s_instance;\n", generated)
             self.assertNotIn("s_instance.System()", generated)
+            self.assertIn("start = !pocket_stop_gate.Requested();", generated)
+            self.assertIn("if (pocket_stop_gate.Requested()) return Core::SystemResultStatus::Success;", generated)
+            self.assertIn("if (!m_is_running || pocket_stop_gate.Requested())", generated)
+            self.assertIn("if (!m_is_running || !m_window || pocket_stop_gate.Requested())", generated)
+            self.assertIn("if (pocket_stop_gate.Requested()) return;\n    void(m_system.Run());", generated)
 
     def test_unreviewed_native_target_stops_before_toolchain_setup(self):
         script = HOOK.parents[2] / "scripts/build-switch-probe.sh"

@@ -12,6 +12,12 @@ if [[ "$target" != yuzu-android && "$target" != pocket_switch2 ]]; then
   echo "unsupported native target: $target" >&2
   exit 2
 fi
+phase="${POCKET_SDK_BUILD_PHASE:-all}"
+if [[ "$phase" != all && "$phase" != link && "$phase" != package ]] || \
+   [[ "$target" != pocket_switch2 && "$phase" != all ]]; then
+  echo "unsupported native build phase: $phase" >&2
+  exit 2
+fi
 
 sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
 ndk="$sdk_root/ndk/28.2.13676358"
@@ -48,27 +54,35 @@ if [[ -e "$output_dir" ]]; then
   exit 2
 fi
 
-"$cmake" -S "$source_dir" -B "$build_dir" -G Ninja \
-  -DCMAKE_MAKE_PROGRAM="$ninja" \
-  -DCMAKE_TOOLCHAIN_FILE="$ndk/build/cmake/android.toolchain.cmake" \
-  -DANDROID_ABI="$abi" -DANDROID_PLATFORM=android-33 -DANDROID_STL=c++_shared \
-  -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-  -DENABLE_QT=OFF -DENABLE_WEB_SERVICE=ON -DANDROID_ARM_NEON=ON \
-  -DYUZU_USE_CPM=ON -DCPMUTIL_FORCE_BUNDLED=ON \
-  -DYUZU_USE_BUNDLED_FFMPEG=ON -DYUZU_USE_BUNDLED_SDL3=ON \
-  -DGLSLANGVALIDATOR="$validator" \
-  -DBUILD_TESTING=OFF -DYUZU_TESTS=OFF -DDYNARMIC_TESTS=OFF \
-  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON "${sdk_args[@]}"
 if [[ "$target" == pocket_switch2 ]]; then
   sdl_java="$source_dir/externals/generated/sdl/java"
+fi
+if [[ "$phase" != package ]]; then
+  "$cmake" -S "$source_dir" -B "$build_dir" -G Ninja \
+    -DCMAKE_MAKE_PROGRAM="$ninja" \
+    -DCMAKE_TOOLCHAIN_FILE="$ndk/build/cmake/android.toolchain.cmake" \
+    -DANDROID_ABI="$abi" -DANDROID_PLATFORM=android-33 -DANDROID_STL=c++_shared \
+    -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+    -DENABLE_QT=OFF -DENABLE_WEB_SERVICE=ON -DANDROID_ARM_NEON=ON \
+    -DYUZU_USE_CPM=ON -DCPMUTIL_FORCE_BUNDLED=ON \
+    -DYUZU_USE_BUNDLED_FFMPEG=ON -DYUZU_USE_BUNDLED_SDL3=ON \
+    -DGLSLANGVALIDATOR="$validator" \
+    -DBUILD_TESTING=OFF -DYUZU_TESTS=OFF -DDYNARMIC_TESTS=OFF \
+    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON "${sdk_args[@]}"
+fi
+if [[ "$target" == pocket_switch2 ]]; then
   if [[ ! -f "$sdl_java/org/libsdl/app/SDL.java" ]]; then
     echo "Pinned SDL Android Java bootstrap was not generated" >&2
     exit 1
   fi
-  python3 "$repo_root/scripts/build-switch-sdk-objects.py" \
-    "$build_dir/compile_commands.json" "$repo_root/switch/native" "$build_dir" "$ninja"
 fi
-"$cmake" --build "$build_dir" --target "$target" --parallel 2
+if [[ "$phase" != package ]]; then
+  if [[ "$target" == pocket_switch2 ]]; then
+    python3 "$repo_root/scripts/build-switch-sdk-objects.py" \
+      "$build_dir/compile_commands.json" "$repo_root/switch/native" "$build_dir" "$ninja"
+  fi
+  "$cmake" --build "$build_dir" --target "$target" --parallel 2
+fi
 
 binary_name=lib${target}.so
 mapfile -t binaries < <(find "$build_dir" -type f -name "$binary_name" -print)
@@ -76,7 +90,11 @@ if [[ ${#binaries[@]} -ne 1 ]]; then
   echo "Expected one $binary_name, found ${#binaries[@]}" >&2
   exit 1
 fi
-"$readelf" -h "${binaries[0]}" | grep -q 'AArch64'
+"$readelf" -h "${binaries[0]}" | grep 'AArch64' >/dev/null
+if [[ "$phase" == link ]]; then
+  echo "Linked native source target: ${binaries[0]}"
+  exit 0
+fi
 
 mkdir -p "$(dirname "$output_dir")"
 stage="$(mktemp -d "$(dirname "$output_dir")/.hokkaido-$abi.XXXXXX")"

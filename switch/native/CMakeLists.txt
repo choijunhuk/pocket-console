@@ -34,6 +34,58 @@ foreach(source IN LISTS upstream_sources)
         if(NOT instance_count EQUAL 2)
             message(FATAL_ERROR "Pinned session has another eager reference")
         endif()
+        set(run_before [=[void EmulationSession::RunEmulation() {
+    {
+        std::scoped_lock lock(m_mutex);
+        m_is_running = true;
+    }]=])
+        set(run_after [=[void EmulationSession::RunEmulation() {
+    bool start;
+    {
+        std::scoped_lock lock(m_mutex);
+        start = !pocket_stop_gate.Requested();
+        m_is_running = start;
+    }
+    if (!start) return;]=])
+        set(scope_before [=[    SCOPE_EXIT {
+        EmulationSession::GetInstance().ShutdownEmulation();
+    };]=])
+        set(scope_after [=[    if (pocket_stop_gate.Requested()) return Core::SystemResultStatus::Success;
+
+    SCOPE_EXIT {
+        EmulationSession::GetInstance().ShutdownEmulation();
+    };]=])
+        set(wait_before [=[                    return !m_is_running || m_pending_shader_cache_title.has_value();
+                })) {
+                if (!m_is_running) {]=])
+        set(wait_after [=[                    return !m_is_running || m_pending_shader_cache_title.has_value()
+                           || pocket_stop_gate.Requested();
+                })) {
+                if (!m_is_running || pocket_stop_gate.Requested()) {]=])
+        set(surface_before [=[void EmulationSession::SurfaceChanged() {
+    if (!IsRunning()) {
+        return;
+    }
+    m_window->OnSurfaceChanged(m_native_window);
+}]=])
+        set(surface_after [=[void EmulationSession::SurfaceChanged() {
+    std::scoped_lock lock(m_mutex);
+    if (!m_is_running || !m_window || pocket_stop_gate.Requested()) {
+        return;
+    }
+    m_window->OnSurfaceChanged(m_native_window);
+}]=])
+        set(start_core_before [=[    void(m_system.Run());]=])
+        set(start_core_after [=[    if (pocket_stop_gate.Requested()) return;
+    void(m_system.Run());]=])
+        foreach(patch IN ITEMS run scope wait surface start_core)
+            string(FIND "${native_source}" "${${patch}_before}" patch_location)
+            if(patch_location LESS 0)
+                message(FATAL_ERROR "Pinned ${patch} cancellation seam changed")
+            endif()
+            string(REPLACE "${${patch}_before}" "${${patch}_after}"
+                native_source "${native_source}")
+        endforeach()
         file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/pocket-switch-sdk")
         file(WRITE "${CMAKE_BINARY_DIR}/pocket-switch-sdk/native.cpp" "${native_source}")
         list(APPEND sdk_sources "${CMAKE_BINARY_DIR}/pocket-switch-sdk/native.cpp")

@@ -14,6 +14,7 @@ import java.util.Locale;
 public final class NativeLibrary {
     public interface Listener {
         Context context();
+        default boolean isEnding() { return false; }
         void onLoaded();
         void onFirstFramePresented();
         void onStopped(int result);
@@ -30,6 +31,12 @@ public final class NativeLibrary {
     private NativeLibrary() {}
 
     public static native int probeNativeBridge();
+    public static native long resetPocketStopRequest();
+    public static native void requestPocketStop(long generation);
+    public static native void haltPocketSession(long generation);
+    public static native void pausePocketSession(long generation);
+    public static native void unpausePocketSession(long generation);
+    public static native void refreshPocketSurface(long generation);
 
     public static synchronized void initialize(Listener owner, String backend)
             throws ReflectiveOperationException {
@@ -66,7 +73,6 @@ public final class NativeLibrary {
     public static void unsupportedApplet(String reason) {
         Listener owner = current();
         if (owner != null) owner.onUnsupportedApplet(reason);
-        else if (initialized) stopEmulation();
     }
 
     public static void onEmulationStarted() {
@@ -198,11 +204,7 @@ public final class NativeLibrary {
             String libraryDirectory, String customDirectory, String customDriver, String redirectDirectory);
     public static native void initializeSystem(boolean reload);
     public static native void surfaceChanged(android.view.Surface surface);
-    public static native void refreshSurface();
     public static native void surfaceDestroyed();
     public static native void run(String path, int programIndex, boolean frontendInitiated);
-    public static native void pauseEmulation();
-    public static native void unpauseEmulation();
-    public static native void stopEmulation();
     public static native boolean isRunning();
 }

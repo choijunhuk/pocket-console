@@ -18,6 +18,8 @@
 
 #pragma once
 
+#include "stop_gate.h"
+
 class EmulationSession final {
 public:
     explicit EmulationSession();
