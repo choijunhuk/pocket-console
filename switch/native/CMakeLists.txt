@@ -78,10 +78,14 @@ foreach(source IN LISTS upstream_sources)
         set(start_core_before [=[    void(m_system.Run());]=])
         set(start_core_after [=[    if (pocket_stop_gate.Requested()) return;
     void(m_system.Run());]=])
-        foreach(patch IN ITEMS run scope wait surface start_core)
+        # The offline Android virtual gamepad does not use Cemuhook UDP controllers.
+        set(offline_udp_before [=[        m_input_subsystem.Initialize();]=])
+        set(offline_udp_after [=[        Settings::values.udp_input_servers.SetValue("");
+        m_input_subsystem.Initialize();]=])
+        foreach(patch IN ITEMS run scope wait surface start_core offline_udp)
             string(FIND "${native_source}" "${${patch}_before}" patch_location)
             if(patch_location LESS 0)
-                message(FATAL_ERROR "Pinned ${patch} cancellation seam changed")
+                message(FATAL_ERROR "Pinned ${patch} source seam changed")
             endif()
             string(REPLACE "${${patch}_before}" "${${patch}_after}"
                 native_source "${native_source}")

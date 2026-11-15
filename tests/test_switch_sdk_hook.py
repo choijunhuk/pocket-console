@@ -75,6 +75,11 @@ class ProjectHookTests(unittest.TestCase):
 static EmulationSession s_instance;
 EmulationSession& getInstance() { return s_instance; }
 void multiplayer() { s_instance.System(); }
+void EmulationSession::InitializeSystem(bool reload) {
+    if (!reload) {
+        m_input_subsystem.Initialize();
+    }
+}
 void EmulationSession::SurfaceChanged() {
     if (!IsRunning()) {
         return;
@@ -146,6 +151,19 @@ void waitLoop() {
             self.assertIn("if (!m_is_running || pocket_stop_gate.Requested())", generated)
             self.assertIn("if (!m_is_running || !m_window || pocket_stop_gate.Requested())", generated)
             self.assertIn("if (pocket_stop_gate.Requested()) return;\n    void(m_system.Run());", generated)
+            self.assertIn('Settings::values.udp_input_servers.SetValue("");\n        m_input_subsystem.Initialize();', generated)
+            native = root / "src/android/app/src/main/jni/native.cpp"
+            native.write_text(native.read_text().replace(
+                "m_input_subsystem.Initialize();", "m_input_subsystem.Start();"))
+            changed = subprocess.run(
+                ["cmake", "-S", str(root), "-B", str(root / "changed"), "-DANDROID=ON",
+                 f"-DCMAKE_PROJECT_INCLUDE={HOOK}",
+                 f"-DPOCKET_HOKKAIDO_SOURCE_DIR={root}",
+                 f"-DPOCKET_SDK_SOURCE_DIR={HOOK.parent}"],
+                capture_output=True, text=True,
+            )
+            self.assertNotEqual(changed.returncode, 0)
+            self.assertIn("Pinned offline_udp source seam changed", changed.stderr)
 
     def test_unreviewed_native_target_stops_before_toolchain_setup(self):
         script = HOOK.parents[2] / "scripts/build-switch-probe.sh"
