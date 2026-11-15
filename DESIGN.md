@@ -37,6 +37,9 @@
 
 ## Adaptive behavior
 
+- Player display refinement (2026-11-15): retain the tactile normal view, remove fixed 360/400dp display-width caps, and offer immersive fullscreen for DS and 3DS. Fullscreen hides metadata/system bars and uses a black, borderless game viewport with a persistent 48dp menu escape. System edge swipes may reveal transient bars.
+- Screen choices are automatic dual-screen, large primary with smaller secondary, and single primary screen. A separate screen-swap action changes the primary screen; preserve each screen's native aspect ratio and keep the lower screen's touch coordinates correct in every visible placement. Hidden lower screens accept no touch input. Fullscreen initially favors the large-primary layout; explicit choices persist per system.
+- Fullscreen virtual controls may overlay the viewport and can be hidden/restored from the menu. Keep their touch targets outside cutout/mandatory gesture areas, release held inputs before layout transitions, preserve simultaneous touches, and retain an explicit normal-save/exit action. Android Back first leaves fullscreen, then follows the existing game-exit flow.
 - Apply status bar, navigation bar, cutout, and IME insets. Honor system Back and predictive Back. Content can scroll on compact screens; no screen or required control may be clipped.
 - Check portrait 360 × 640 dp, landscape 640 × 360 dp, a tablet layout, and a split window. The DS and 3DS players prioritize screens plus reachable controls in portrait; landscape places controls alongside screens where space allows. Constrain shell width on tablets instead of stretching buttons.
 - Check font scale 1.3, dark theme, focus order, screen-reader labels, and reduced animations. Keep the player operable with simultaneous directional and face-button input.

@@ -6,6 +6,7 @@ import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.graphics.Bitmap;
 import android.graphics.Rect;
+import android.graphics.RectF;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.SystemClock;
@@ -14,6 +15,9 @@ import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.MotionEvent;
+import android.view.InputDevice;
+import android.view.KeyEvent;
+import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.Button;
 import android.widget.TextView;
 
@@ -25,6 +29,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.util.Arrays;
 
@@ -77,6 +82,7 @@ public final class DsSmokeInstrumentation extends Instrumentation {
             testStaleClose(rom, root);
             Log.i(TAG, "native_checks_end");
             testPlayerUi(rom, root);
+            testThreeDsDisplayUi();
             if (arguments != null && "true".equals(arguments.getString("pocketExportScreenshot"))) {
                 File screenshot = new File(getTargetContext().getCacheDir(), "smoke-player.png");
                 require(screenshot.length() > 8 && screenshot.length() <= 512 * 1024,
@@ -86,7 +92,8 @@ public final class DsSmokeInstrumentation extends Instrumentation {
                         + Base64.encodeToString(Files.readAllBytes(screenshot.toPath()), Base64.NO_WRAP));
                 sendStatus(0, screenshotStatus);
             }
-            result.putString("stream", "DS_ANDROID_SMOKE_PASS cache/smoke-player.png");
+            result.putString("stream", "DS_ANDROID_SMOKE_PASS cache/smoke-player.png "
+                    + "DS_DISPLAY_LAYOUT_PASS THREEDS_DISPLAY_UI_PASS (layout only)");
             Log.i(TAG, "DS_ANDROID_SMOKE_PASS");
             finish(Activity.RESULT_OK, result);
         } catch (Throwable failure) {
@@ -216,6 +223,7 @@ public final class DsSmokeInstrumentation extends Instrumentation {
     }
 
     private void testPlayerUi(File rom, File root) throws Exception {
+        getTargetContext().getSharedPreferences("player-display-ds", 0).edit().clear().commit();
         Intent intent = new Intent().setClassName(getTargetContext().getPackageName(),
                 "dev.pocketconsole.DsPlayerActivity");
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -284,6 +292,7 @@ public final class DsSmokeInstrumentation extends Instrumentation {
             requirePlayerControls(activity, landscape);
             landscape.recycle();
 
+            testFullscreenUi(activity);
             testPlayerExit(activity);
             testFreshSessionAfterExit(rom, root);
         } finally {
@@ -293,6 +302,259 @@ public final class DsSmokeInstrumentation extends Instrumentation {
             }
             runOnMainSync(activity::finish);
         }
+    }
+
+    private void testFullscreenUi(Activity activity) throws Exception {
+        float normalWidth = screenBounds(activity, "top").width();
+        clickPlayerButton(activity, "전체화면");
+        Thread.sleep(600);
+        Bitmap shot = awaitColor(false, 10000, 1);
+        require(shot != null, "fullscreen lost actual DS frames");
+        require(screenBounds(activity, "top").width() > normalWidth * 1.2f,
+                "fullscreen did not enlarge the primary display");
+        requirePlayerControls(activity, shot);
+        saveDisplayShot(shot, "smoke-player-fullscreen.png");
+
+        clickPlayerButton(activity, "메뉴");
+        clickPopup("버튼 숨기기");
+        Thread.sleep(200);
+        final View[] a = {null};
+        runOnMainSync(() -> a[0] = findText(activity.getWindow().getDecorView(), "A"));
+        require(a[0] == null, "fullscreen controls were not hidden");
+        touchScreenCenter(activity, true);
+
+        clickPlayerButton(activity, "메뉴");
+        clickPopup("위/아래 화면 바꾸기");
+        Thread.sleep(200);
+        touchScreenCenter(activity, true);
+        saveDisplayShot(getUiAutomation().takeScreenshot(), "smoke-player-large-bottom.png");
+        clickPlayerButton(activity, "메뉴");
+        clickPopup("위/아래 화면 바꾸기");
+
+        clickPlayerButton(activity, "메뉴");
+        clickPopup("화면 배치");
+        clickPopup("주 화면만");
+        Thread.sleep(200);
+        require(screenBounds(activity, "bottom").isEmpty(), "single top still displays bottom");
+        require(!screenBounds(activity, "top").isEmpty(), "single top display is absent");
+        final View[] screen = {null};
+        runOnMainSync(() -> {
+            screen[0] = playerScreen(activity);
+            MotionEvent event = MotionEvent.obtain(0, 0, MotionEvent.ACTION_DOWN, 1, 1, 0);
+            try { require(!screen[0].dispatchTouchEvent(event), "hidden bottom accepted touch"); }
+            finally { event.recycle(); }
+        });
+        saveDisplayShot(getUiAutomation().takeScreenshot(), "smoke-player-single.png");
+
+        clickPlayerButton(activity, "메뉴");
+        clickPopup("위/아래 화면 바꾸기");
+        shot = awaitColor(false, 10000, 1);
+        require(shot != null && screenBounds(activity, "top").isEmpty(),
+                "swapping a single display did not reveal bottom");
+        saveDisplayShot(shot, "smoke-player-bottom.png");
+        touchScreenCenter(activity, true);
+
+        clickPlayerButton(activity, "메뉴");
+        clickPopup("버튼 보이기");
+        Thread.sleep(200);
+        Button[] button = {null};
+        runOnMainSync(() -> button[0] = (Button) findText(activity.getWindow().getDecorView(), "A"));
+        require(button[0] != null, "fullscreen controls were not restored");
+        testSplitTouch(activity);
+        runOnMainSync(() -> dispatchButton(button[0], MotionEvent.ACTION_DOWN));
+        shot = awaitColor(true, 10000, 1);
+        require(shot != null, "fullscreen A input did not reach the real core");
+        shot.recycle();
+        waitForIdleSync();
+        Thread.sleep(500);
+        sendKeyDownUpSync(KeyEvent.KEYCODE_BACK);
+        Thread.sleep(500);
+        require(!activity.isFinishing(), "Back exited the game instead of fullscreen");
+        require(!getTargetContext().getSharedPreferences("player-display-ds", 0)
+                .getBoolean("fullscreen", true), "real Back did not leave fullscreen");
+        clickPlayerButton(activity, "화면 배치");
+        clickPopup("화면 배치");
+        clickPopup("화면 둘 다");
+        clickPlayerButton(activity, "화면 배치");
+        clickPopup("위/아래 화면 바꾸기");
+        Field field = activity.getClass().getDeclaredField("buttons");
+        field.setAccessible(true);
+        require(((java.util.concurrent.atomic.AtomicInteger) field.get(activity)).get() == 0,
+                "held input survived a layout transition");
+        Log.i(TAG, "DS_DISPLAY_LAYOUT_PASS fullscreen/single/swap/touch/back");
+    }
+
+    private void testSplitTouch(Activity activity) throws Exception {
+        View[] controls = new View[2];
+        int[][] location = {new int[2], new int[2]};
+        runOnMainSync(() -> {
+            controls[0] = findText(activity.getWindow().getDecorView(), "↑");
+            controls[1] = findText(activity.getWindow().getDecorView(), "A");
+            for (int i = 0; i < 2; i++) if (controls[i] != null) controls[i].getLocationOnScreen(location[i]);
+        });
+        require(controls[0] != null && controls[1] != null, "split-touch controls missing");
+        float[] x = {location[0][0] + controls[0].getWidth() / 2f,
+                location[1][0] + controls[1].getWidth() / 2f};
+        float[] y = {location[0][1] + controls[0].getHeight() / 2f,
+                location[1][1] + controls[1].getHeight() / 2f};
+        long time = SystemClock.uptimeMillis();
+        injectTouch(time, MotionEvent.ACTION_DOWN, x[0], y[0]);
+        try {
+            injectPointers(time, MotionEvent.ACTION_POINTER_DOWN | (1 << MotionEvent.ACTION_POINTER_INDEX_SHIFT), x, y);
+            Field field = activity.getClass().getDeclaredField("buttons");
+            field.setAccessible(true);
+            int mask = ((java.util.concurrent.atomic.AtomicInteger) field.get(activity)).get();
+            require((mask & ((1 << 4) | (1 << 8))) == ((1 << 4) | (1 << 8)),
+                    "separate fullscreen pads did not retain simultaneous input");
+            Bitmap image = awaitColor(true, 10000, 1);
+            require(image != null, "simultaneous A input did not reach actual core");
+            image.recycle();
+            injectPointers(time, MotionEvent.ACTION_POINTER_UP | (1 << MotionEvent.ACTION_POINTER_INDEX_SHIFT), x, y);
+        } finally { injectTouch(time, MotionEvent.ACTION_UP, x[0], y[0]); }
+    }
+
+    private void injectPointers(long time, int action, float[] x, float[] y) {
+        MotionEvent.PointerProperties[] properties = new MotionEvent.PointerProperties[2];
+        MotionEvent.PointerCoords[] coordinates = new MotionEvent.PointerCoords[2];
+        for (int i = 0; i < 2; i++) {
+            properties[i] = new MotionEvent.PointerProperties();
+            properties[i].id = i;
+            properties[i].toolType = MotionEvent.TOOL_TYPE_FINGER;
+            coordinates[i] = new MotionEvent.PointerCoords();
+            coordinates[i].x = x[i]; coordinates[i].y = y[i];
+            coordinates[i].pressure = 1; coordinates[i].size = 1;
+        }
+        MotionEvent event = MotionEvent.obtain(time, SystemClock.uptimeMillis(), action, 2,
+                properties, coordinates, 0, 0, 1, 1, 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0);
+        try { require(getUiAutomation().injectInputEvent(event, true), "multi-touch injection failed"); }
+        finally { event.recycle(); }
+    }
+
+    private View playerScreen(Activity activity) {
+        try {
+            Field field = activity.getClass().getDeclaredField("screens");
+            field.setAccessible(true);
+            return (View) field.get(activity);
+        } catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+    }
+
+    private RectF screenBounds(Activity activity, String name) throws Exception {
+        RectF[] bounds = {null};
+        runOnMainSync(() -> {
+            try {
+                View screen = playerScreen(activity);
+                Field field = screen.getClass().getDeclaredField(name);
+                field.setAccessible(true);
+                bounds[0] = new RectF((RectF) field.get(screen));
+            } catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+        });
+        return bounds[0];
+    }
+
+    private void touchScreenCenter(Activity activity, boolean lower) throws Exception {
+        RectF bounds = screenBounds(activity, lower ? "bottom" : "top");
+        require(!bounds.isEmpty(), "touch test display is hidden");
+        int[] location = new int[2];
+        runOnMainSync(() -> playerScreen(activity).getLocationOnScreen(location));
+        long now = SystemClock.uptimeMillis();
+        injectTouch(now, MotionEvent.ACTION_DOWN, location[0] + bounds.centerX(), location[1] + bounds.centerY());
+        try {
+            Field x = activity.getClass().getDeclaredField("touchX");
+            Field y = activity.getClass().getDeclaredField("touchY");
+            x.setAccessible(true); y.setAccessible(true);
+            require(Math.abs(x.getInt(activity) - 128) <= 1
+                    && Math.abs(y.getInt(activity) - 96) <= 1,
+                    "root-dispatched bottom touch did not map to native center");
+        } finally {
+            injectTouch(now, MotionEvent.ACTION_UP, location[0] + bounds.centerX(), location[1] + bounds.centerY());
+        }
+    }
+
+    private void injectTouch(long downTime, int action, float x, float y) {
+        MotionEvent event = MotionEvent.obtain(downTime, SystemClock.uptimeMillis(), action, x, y, 0);
+        event.setSource(InputDevice.SOURCE_TOUCHSCREEN);
+        try { require(getUiAutomation().injectInputEvent(event, true), "touch injection failed"); }
+        finally { event.recycle(); }
+    }
+
+    private void clickPlayerButton(Activity activity, String label) {
+        View[] target = {null};
+        runOnMainSync(() -> target[0] = findText(activity.getWindow().getDecorView(), label));
+        require(target[0] != null, "missing display action: " + label);
+        runOnMainSync(target[0]::performClick);
+    }
+
+    private void clickPopup(String label) throws InterruptedException {
+        long end = SystemClock.uptimeMillis() + 4000;
+        while (SystemClock.uptimeMillis() < end) {
+            AccessibilityNodeInfo root = getUiAutomation().getRootInActiveWindow();
+            if (root != null) for (AccessibilityNodeInfo node : root.findAccessibilityNodeInfosByText(label)) {
+                if (!label.contentEquals(node.getText() == null ? "" : node.getText())) continue;
+                Rect bounds = new Rect();
+                node.getBoundsInScreen(bounds);
+                if (!bounds.isEmpty()) {
+                    long now = SystemClock.uptimeMillis();
+                    injectTouch(now, MotionEvent.ACTION_DOWN, bounds.centerX(), bounds.centerY());
+                    injectTouch(now, MotionEvent.ACTION_UP, bounds.centerX(), bounds.centerY());
+                    Thread.sleep(300);
+                    return;
+                }
+            }
+            Thread.sleep(100);
+        }
+        throw new AssertionError("display menu action missing: " + label);
+    }
+
+    private void saveDisplayShot(Bitmap shot, String name) throws Exception {
+        require(shot != null, "display screenshot unavailable");
+        shot.recycle();
+        Thread.sleep(400); // Capture the settled layout after native popup/inset animations.
+        shot = getUiAutomation().takeScreenshot();
+        require(shot != null, "settled display screenshot unavailable");
+        try (FileOutputStream output = new FileOutputStream(new File(getTargetContext().getCacheDir(), name))) {
+            require(shot.compress(Bitmap.CompressFormat.PNG, 100, output), "display screenshot write failed");
+        } finally { shot.recycle(); }
+    }
+
+    private void testThreeDsDisplayUi() throws Exception {
+        getTargetContext().getSharedPreferences("player-display-3ds", 0).edit().clear().commit();
+        Intent intent = new Intent().setClassName(getTargetContext().getPackageName(),
+                "dev.pocketconsole.ThreeDsPlayerActivity");
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        runOnMainSync(() -> getTargetContext().startActivity(intent));
+        Thread.sleep(500);
+        clickPopup("전체화면");
+        Thread.sleep(600);
+        Bitmap shot = getUiAutomation().takeScreenshot();
+        require(shot != null, "3DS layout screenshot missing");
+        AccessibilityNodeInfo root = getUiAutomation().getRootInActiveWindow();
+        require(root != null, "3DS layout window missing");
+        for (String label : new String[]{"메뉴", "A", "B", "X", "Y", "L", "R", "SELECT", "START", "↑", "↓", "←", "→"}) {
+            boolean visible = false;
+            for (AccessibilityNodeInfo node : root.findAccessibilityNodeInfosByText(label)) {
+                if (!label.contentEquals(node.getText() == null ? "" : node.getText())) continue;
+                Rect bounds = new Rect();
+                node.getBoundsInScreen(bounds);
+                int target = Math.round(48 * getTargetContext().getResources().getDisplayMetrics().density);
+                visible = node.isVisibleToUser() && bounds.width() >= target - 1 && bounds.height() >= target - 1
+                        && bounds.left >= 0 && bounds.top >= 0
+                        && bounds.right <= shot.getWidth() && bounds.bottom <= shot.getHeight();
+                if (visible) break;
+            }
+            require(visible, "3DS fullscreen control is clipped: " + label);
+        }
+        saveDisplayShot(shot, "smoke-three-ds-layout.png");
+        sendKeyDownUpSync(KeyEvent.KEYCODE_BACK);
+        Thread.sleep(300);
+        root = getUiAutomation().getRootInActiveWindow();
+        boolean normal = false;
+        if (root != null) for (AccessibilityNodeInfo node : root.findAccessibilityNodeInfosByText("전체화면")) {
+            if ("전체화면".contentEquals(node.getText() == null ? "" : node.getText())
+                    && node.isVisibleToUser()) normal = true;
+        }
+        require(normal, "3DS Back did not return to the normal display");
+        sendKeyDownUpSync(KeyEvent.KEYCODE_BACK);
+        Log.i(TAG, "THREEDS_DISPLAY_UI_PASS layout-only; emulation NOT_RUN");
     }
 
     private void testPlayerExit(Activity activity) throws Exception {

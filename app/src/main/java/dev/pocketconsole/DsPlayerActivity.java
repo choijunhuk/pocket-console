@@ -21,6 +21,7 @@ import android.view.WindowInsets;
 import android.window.OnBackInvokedCallback;
 import android.window.OnBackInvokedDispatcher;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -58,24 +59,42 @@ public final class DsPlayerActivity extends Activity {
     private volatile DsScreenView screens;
     private ConsoleUi.InputScrollGuard inputGuard;
     private OnBackInvokedCallback backCallback;
+    private PlayerDisplayUi display;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         ui = new ConsoleUi(this);
         PAPER = ui.paper; INK = ui.ink; SHELL = ui.shell; ORANGE = ui.accent;
+        display = new PlayerDisplayUi(this, "ds", this::buildUi, this::clearInput, this::requestExit);
         buildUi();
-        String uri = getIntent().getStringExtra(EXTRA_ROM_URI);
-        if (uri == null) { showStatus("DS 파일 주소가 없어요."); playerDone = true; return; }
         if (Build.VERSION.SDK_INT >= 33) {
-            backCallback = this::requestExit;
+            backCallback = this::handleBack;
             getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
                     OnBackInvokedDispatcher.PRIORITY_DEFAULT, backCallback);
         }
+        String uri = getIntent().getStringExtra(EXTRA_ROM_URI);
+        if (uri == null) { showStatus("DS 파일 주소가 없어요."); playerDone = true; return; }
         player = PLAYER.submit(() -> play(Uri.parse(uri)));
     }
 
     @android.annotation.SuppressLint("GestureBackNavigation")
-    @Override public void onBackPressed() { requestExit(); }
+    @Override public void onBackPressed() { handleBack(); }
+
+    private void handleBack() {
+        if (display.isFullscreen()) display.toggleFullscreen();
+        else requestExit();
+    }
+
+    @Override public void onWindowFocusChanged(boolean focused) {
+        super.onWindowFocusChanged(focused);
+        if (focused && display != null) display.applyBars(ui);
+    }
+
+    private void clearInput() {
+        buttons.set(0);
+        touchDown = false;
+        if (inputGuard != null) inputGuard.reset();
+    }
 
     @Override protected void onResume() {
         super.onResume();
@@ -85,26 +104,20 @@ public final class DsPlayerActivity extends Activity {
 
     @Override protected void onPause() {
         paused = true;
-        buttons.set(0);
-        touchDown = false;
-        if (inputGuard != null) inputGuard.reset();
+        clearInput();
         synchronized (lifecycle) { lifecycle.notifyAll(); }
         super.onPause();
     }
 
     @Override public void onConfigurationChanged(Configuration configuration) {
         super.onConfigurationChanged(configuration);
-        buttons.set(0);
-        touchDown = false;
-        if (inputGuard != null) inputGuard.reset();
+        clearInput();
         buildUi();
     }
 
     @Override protected void onDestroy() {
         stopped = true;
-        buttons.set(0);
-        touchDown = false;
-        if (inputGuard != null) inputGuard.reset();
+        clearInput();
         synchronized (lifecycle) { lifecycle.notifyAll(); }
         if (player != null) player.cancel(true);
         if (Build.VERSION.SDK_INT >= 33 && backCallback != null) {
@@ -118,9 +131,7 @@ public final class DsPlayerActivity extends Activity {
         if (playerDone) { finish(); return; }
         exitRequested = true;
         stopped = true;
-        buttons.set(0);
-        touchDown = false;
-        if (inputGuard != null) inputGuard.reset();
+        clearInput();
         showStatus("종료 중 · 게임 내 저장 마무리");
         synchronized (lifecycle) { lifecycle.notifyAll(); }
         if (playerStarted && player != null) player.cancel(true);
@@ -178,41 +189,48 @@ public final class DsPlayerActivity extends Activity {
         page.setMotionEventSplittingEnabled(true);
         page.setPadding(dp(16), dp(8), dp(16), dp(8));
         scroll.addView(page);
-        setContentView(scroll);
-        ui.applySystemBars(getWindow());
-        scroll.requestApplyInsets();
+        if (!display.isFullscreen()) {
+            setContentView(scroll);
+            display.applyBars(ui);
+            scroll.requestApplyInsets();
+        }
 
         LinearLayout header = row();
         Button exit = plainButton("‹  라이브러리", SHELL);
         exit.setContentDescription("DS 게임을 종료하고 라이브러리로 돌아가기");
         exit.setOnClickListener(v -> requestExit());
         header.addView(exit, new LinearLayout.LayoutParams(0, dp(48), 1));
-        TextView title = text("DS  /  PLAY", 14, true);
-        title.setTextColor(ORANGE);
-        title.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
-        header.addView(title, new LinearLayout.LayoutParams(0, dp(48), 1));
+        Button layoutButton = plainButton("화면 배치", SHELL);
+        layoutButton.setContentDescription("DS 화면 배치 선택");
+        layoutButton.setOnClickListener(v -> display.showMenu(v, this::setLayoutMode));
+        header.addView(layoutButton, new LinearLayout.LayoutParams(0, dp(48), 1));
+        Button fullscreenButton = plainButton("전체화면", SHELL);
+        fullscreenButton.setContentDescription("DS 전체화면으로 보기");
+        fullscreenButton.setOnClickListener(v -> display.toggleFullscreen());
+        header.addView(fullscreenButton, new LinearLayout.LayoutParams(0, dp(48), 1));
         page.addView(header);
         status = text(statusText, 13, false);
         status.setPadding(0, dp(4), 0, dp(4));
         status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
-        page.addView(status);
+        if (!display.isFullscreen()) page.addView(status);
         boolean landscape = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
         screens = new DsScreenView(this, landscape, inputGuard, (x, y, down) -> {
             touchX = x;
             touchY = y;
             touchDown = down;
         });
+        screens.setLayoutMode(display.mode(), display.swapped(), display.isFullscreen());
         LinearLayout controls = new LinearLayout(this);
         controls.setOrientation(LinearLayout.VERTICAL);
         controls.setMotionEventSplittingEnabled(true);
         LinearLayout hands = row();
         hands.setPadding(0, dp(4), 0, dp(4));
-        hands.addView(pad(new String[][]{{"", "↑", ""}, {"←", "", "→"}, {"", "↓", ""}},
-                new int[][]{{-1, 4, -1}, {6, -1, 7}, {-1, 5, -1}}),
-                new LinearLayout.LayoutParams(0, -2, 1));
-        hands.addView(pad(new String[][]{{"", "X", ""}, {"Y", "", "A"}, {"", "B", ""}},
-                new int[][]{{-1, 9, -1}, {1, -1, 8}, {-1, 0, -1}}),
-                new LinearLayout.LayoutParams(0, -2, 1));
+        LinearLayout dpad = pad(new String[][]{{"", "↑", ""}, {"←", "", "→"}, {"", "↓", ""}},
+                new int[][]{{-1, 4, -1}, {6, -1, 7}, {-1, 5, -1}});
+        LinearLayout abxy = pad(new String[][]{{"", "X", ""}, {"Y", "", "A"}, {"", "B", ""}},
+                new int[][]{{-1, 9, -1}, {1, -1, 8}, {-1, 0, -1}});
+        hands.addView(dpad, new LinearLayout.LayoutParams(0, -2, 1));
+        hands.addView(abxy, new LinearLayout.LayoutParams(0, -2, 1));
         controls.addView(hands);
         LinearLayout utility = row();
         for (String label : new String[]{"L", "SELECT", "START", "R"}) {
@@ -221,6 +239,19 @@ public final class DsPlayerActivity extends Activity {
             utility.addView(control(label, bit), new LinearLayout.LayoutParams(0, dp(48), 1));
         }
         controls.addView(utility);
+        if (display.isFullscreen()) {
+            hands.removeView(dpad);
+            hands.removeView(abxy);
+            controls.removeView(utility);
+            Button menu = plainButton("메뉴", SHELL);
+            menu.setContentDescription("DS 전체화면 메뉴");
+            menu.setOnClickListener(v -> display.showMenu(v, this::setLayoutMode));
+            FrameLayout full = display.fullscreenView(screens, dpad, abxy, utility, status, menu);
+            setContentView(full);
+            display.applyBars(ui);
+            full.requestApplyInsets();
+            return;
+        }
         if (landscape) {
             LinearLayout content = row();
             content.addView(screens, new LinearLayout.LayoutParams(0, -2, 1));
@@ -245,6 +276,10 @@ public final class DsPlayerActivity extends Activity {
                 screen.setLayoutParams(params);
             }
         });
+    }
+
+    private void setLayoutMode(DualScreenLayout.Mode mode, boolean swapped) {
+        if (screens != null) screens.setLayoutMode(mode, swapped, display.isFullscreen());
     }
 
     private LinearLayout pad(String[][] labels, int[][] bits) {
@@ -316,6 +351,7 @@ public final class DsPlayerActivity extends Activity {
     private void showStatus(String message) {
         statusText = message;
         status.setText(message);
+        display.updateStatus(status);
     }
 
     private void play(Uri uri) {

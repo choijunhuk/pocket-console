@@ -20,6 +20,7 @@ import android.view.WindowInsets;
 import android.window.OnBackInvokedCallback;
 import android.window.OnBackInvokedDispatcher;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -56,26 +57,42 @@ public final class ThreeDsPlayerActivity extends Activity {
     private String statusText = "파일을 확인하고 있어요…";
     private TextView status;
     private OnBackInvokedCallback backCallback;
+    private PlayerDisplayUi display;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         ui = new ConsoleUi(this);
         PAPER = ui.paper; INK = ui.ink; SHELL = ui.shell;
+        display = new PlayerDisplayUi(this, "3ds", this::buildUi, this::clearInput, this::requestExit);
         buildUi();
-        String uri = getIntent().getStringExtra(EXTRA_ROM_URI);
-        if (uri == null) { showStatus("3DS 파일 주소가 없어요."); playerDone = true; return; }
         if (Build.VERSION.SDK_INT >= 33) {
-            backCallback = this::requestExit;
+            backCallback = this::handleBack;
             getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
                     OnBackInvokedDispatcher.PRIORITY_DEFAULT, backCallback);
         }
+        String uri = getIntent().getStringExtra(EXTRA_ROM_URI);
+        if (uri == null) { showStatus("3DS 파일 주소가 없어요."); playerDone = true; return; }
         playerFuture = PLAYER.submit(() -> play(Uri.parse(uri)));
     }
 
     @android.annotation.SuppressLint("GestureBackNavigation")
-    @Override public void onBackPressed() {
-        if (Build.VERSION.SDK_INT >= 33) { super.onBackPressed(); return; }
-        requestExit();
+    @Override public void onBackPressed() { handleBack(); }
+
+    private void handleBack() {
+        if (display.isFullscreen()) display.toggleFullscreen();
+        else requestExit();
+    }
+
+    @Override public void onWindowFocusChanged(boolean focused) {
+        super.onWindowFocusChanged(focused);
+        if (focused && display != null) display.applyBars(ui);
+    }
+
+    private void clearInput() {
+        buttons.set(0);
+        touchDown = false;
+        circleX = circleY = 0;
+        if (inputGuard != null) inputGuard.reset();
     }
 
     @Override protected void onResume() {
@@ -86,29 +103,20 @@ public final class ThreeDsPlayerActivity extends Activity {
 
     @Override protected void onPause() {
         paused = true;
-        buttons.set(0);
-        touchDown = false;
-        circleX = circleY = 0;
-        if (inputGuard != null) inputGuard.reset();
+        clearInput();
         synchronized (lifecycle) { lifecycle.notifyAll(); }
         super.onPause();
     }
 
     @Override public void onConfigurationChanged(Configuration configuration) {
         super.onConfigurationChanged(configuration);
-        buttons.set(0);
-        touchDown = false;
-        circleX = circleY = 0;
-        if (inputGuard != null) inputGuard.reset();
+        clearInput();
         buildUi();
     }
 
     @Override protected void onDestroy() {
         stopped = true;
-        buttons.set(0);
-        touchDown = false;
-        circleX = circleY = 0;
-        if (inputGuard != null) inputGuard.reset();
+        clearInput();
         synchronized (lifecycle) { lifecycle.notifyAll(); }
         if (playerFuture != null) playerFuture.cancel(true);
         if (Build.VERSION.SDK_INT >= 33 && backCallback != null) {
@@ -122,10 +130,7 @@ public final class ThreeDsPlayerActivity extends Activity {
         if (playerDone) { finish(); return; }
         exitRequested = true;
         stopped = true;
-        buttons.set(0);
-        touchDown = false;
-        circleX = circleY = 0;
-        if (inputGuard != null) inputGuard.reset();
+        clearInput();
         showStatus("종료 중… 저장을 반영하고 있어요.");
         synchronized (lifecycle) { lifecycle.notifyAll(); }
         if (playerStarted && playerFuture != null) playerFuture.cancel(true);
@@ -186,21 +191,25 @@ public final class ThreeDsPlayerActivity extends Activity {
         page.setMotionEventSplittingEnabled(true);
         page.setPadding(dp(16), dp(8), dp(16), dp(8));
         scroll.addView(page);
-        setContentView(scroll);
-        ui.applySystemBars(getWindow());
-        scroll.requestApplyInsets();
+        if (!display.isFullscreen()) {
+            setContentView(scroll);
+            display.applyBars(ui);
+            scroll.requestApplyInsets();
+        }
 
         LinearLayout header = row();
         Button exit = button("‹  라이브러리");
         exit.setContentDescription("3DS 게임을 종료하고 라이브러리로 돌아가기");
         exit.setOnClickListener(v -> requestExit());
         header.addView(exit, new LinearLayout.LayoutParams(0, dp(48), 1));
-        TextView title = new TextView(this);
-        title.setText("3DS  /  PLAY");
-        title.setTextSize(14);
-        title.setTextColor(ui.accent);
-        title.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
-        header.addView(title, new LinearLayout.LayoutParams(0, dp(48), 1));
+        Button layoutButton = button("화면 배치");
+        layoutButton.setContentDescription("3DS 화면 배치 선택");
+        layoutButton.setOnClickListener(v -> display.showMenu(v, this::setLayoutMode));
+        header.addView(layoutButton, new LinearLayout.LayoutParams(0, dp(48), 1));
+        Button fullscreenButton = button("전체화면");
+        fullscreenButton.setContentDescription("3DS 전체화면으로 보기");
+        fullscreenButton.setOnClickListener(v -> display.toggleFullscreen());
+        header.addView(fullscreenButton, new LinearLayout.LayoutParams(0, dp(48), 1));
         page.addView(header);
         status = new TextView(this);
         status.setText(statusText);
@@ -208,11 +217,12 @@ public final class ThreeDsPlayerActivity extends Activity {
         status.setTextColor(INK);
         status.setPadding(0, dp(4), 0, dp(4));
         status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
-        page.addView(status);
+        if (!display.isFullscreen()) page.addView(status);
 
         screens = new ThreeDsScreenView(this, inputGuard, (x, y, down) -> {
             touchX = x; touchY = y; touchDown = down;
         });
+        screens.setLayoutMode(display.mode(), display.swapped(), display.isFullscreen());
         ThreeDsCirclePadView circle = new ThreeDsCirclePadView(this, inputGuard, (x, y) -> {
             circleX = x; circleY = y;
         });
@@ -224,23 +234,26 @@ public final class ThreeDsPlayerActivity extends Activity {
         controls.setOrientation(LinearLayout.VERTICAL);
         controls.setGravity(Gravity.CENTER_HORIZONTAL);
         controls.setMotionEventSplittingEnabled(true);
-        boolean landscape = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE
+        boolean landscape = !display.isFullscreen()
+                && getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE
                 && getResources().getConfiguration().screenWidthDp >= 600;
+        LinearLayout leftControls = null;
+        LinearLayout hands = row();
         if (landscape) {
-            LinearLayout hands = row();
             hands.addView(circle, new LinearLayout.LayoutParams(dp(96), dp(96)));
             hands.addView(dpad);
             hands.addView(abxy);
             controls.addView(hands);
         } else {
-            LinearLayout hands = row();
-            LinearLayout left = new LinearLayout(this);
-            left.setOrientation(LinearLayout.VERTICAL);
-            left.setGravity(Gravity.CENTER_HORIZONTAL);
-            left.setMotionEventSplittingEnabled(true);
-            left.addView(circle, new LinearLayout.LayoutParams(dp(96), dp(96)));
-            left.addView(dpad);
-            hands.addView(left, new LinearLayout.LayoutParams(0, -2, 1));
+            leftControls = new LinearLayout(this);
+            boolean compact = display.isFullscreen()
+                    && getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
+            leftControls.setOrientation(compact ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
+            leftControls.setGravity(Gravity.CENTER);
+            leftControls.setMotionEventSplittingEnabled(true);
+            leftControls.addView(circle, new LinearLayout.LayoutParams(dp(96), dp(96)));
+            leftControls.addView(dpad, new LinearLayout.LayoutParams(dp(144), -2));
+            hands.addView(leftControls, new LinearLayout.LayoutParams(0, -2, 1));
             hands.addView(abxy, new LinearLayout.LayoutParams(0, -2, 1));
             controls.addView(hands);
         }
@@ -251,6 +264,19 @@ public final class ThreeDsPlayerActivity extends Activity {
             utility.addView(control(name, bit), new LinearLayout.LayoutParams(0, dp(48), 1));
         }
         controls.addView(utility);
+        if (display.isFullscreen()) {
+            hands.removeView(leftControls);
+            hands.removeView(abxy);
+            controls.removeView(utility);
+            Button menu = button("메뉴");
+            menu.setContentDescription("3DS 전체화면 메뉴");
+            menu.setOnClickListener(v -> display.showMenu(v, this::setLayoutMode));
+            FrameLayout full = display.fullscreenView(screens, leftControls, abxy, utility, status, menu);
+            setContentView(full);
+            display.applyBars(ui);
+            full.requestApplyInsets();
+            return;
+        }
         if (landscape) {
             LinearLayout content = row();
             content.addView(screens, new LinearLayout.LayoutParams(0, -2, 1));
@@ -271,6 +297,10 @@ public final class ThreeDsPlayerActivity extends Activity {
             LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) screen.getLayoutParams();
             if (params.height != height) { params.height = height; screen.setLayoutParams(params); }
         });
+    }
+
+    private void setLayoutMode(DualScreenLayout.Mode mode, boolean swapped) {
+        if (screens != null) screens.setLayoutMode(mode, swapped, display.isFullscreen());
     }
 
     private LinearLayout pad(String[][] labels, int[][] bits) {
@@ -330,6 +360,7 @@ public final class ThreeDsPlayerActivity extends Activity {
     private void showStatus(String message) {
         statusText = message;
         status.setText(message);
+        display.updateStatus(status);
     }
 
     private void play(Uri uri) {

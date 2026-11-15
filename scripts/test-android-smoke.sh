@@ -28,6 +28,11 @@ run_instrumentation() {
 
 adb shell wm size 720x1280
 adb shell wm density 320
+if [ "${GITHUB_ACTIONS:-}" = "true" ] && [ "${POCKET_CI_EMULATOR:-}" = "1" ] \
+        && [ "$(adb shell getprop ro.kernel.qemu | tr -d '\r\n')" = "1" ]; then
+    # A fresh emulator's system onboarding would otherwise cover the gameplay menu.
+    adb shell settings put secure immersive_mode_confirmations confirmed
+fi
 adb install "${POCKET_ANDROID_APK:-artifacts/outputs/apk/debug/app-debug.apk}"
 adb install -t artifacts/outputs/smoke-tests/ds-test.apk
 adb shell dumpsys SurfaceFlinger | grep -i GLES || true

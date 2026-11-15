@@ -6,9 +6,12 @@ javac -encoding UTF-8 -d .cache/model-tests \
     app/src/main/java/dev/pocketconsole/ConsoleType.java \
     app/src/main/java/dev/pocketconsole/DeviceCapabilities.java \
     app/src/main/java/dev/pocketconsole/DsRomCache.java \
+    app/src/main/java/dev/pocketconsole/DualScreenLayout.java \
     tests/ConsoleTypeTest.java \
     tests/DeviceCapabilitiesTest.java \
-    tests/DsRomCacheTest.java
+    tests/DsRomCacheTest.java \
+    tests/DualScreenLayoutTest.java
 java -cp .cache/model-tests dev.pocketconsole.ConsoleTypeTest
 java -cp .cache/model-tests dev.pocketconsole.DeviceCapabilitiesTest
 java -cp .cache/model-tests dev.pocketconsole.DsRomCacheTest
+java -cp .cache/model-tests dev.pocketconsole.DualScreenLayoutTest
