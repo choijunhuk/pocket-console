@@ -1,5 +1,21 @@
 # Android release verification
 
+## 0.3.0-alpha.3
+
+Published 2026-11-15 10:01:52 UTC as a private GitHub prerelease.
+
+- [Release and assets](https://github.com/choijunhuk/pocket-console/releases/tag/v0.3.0-alpha.3)
+- [Download APK](https://github.com/choijunhuk/pocket-console/releases/download/v0.3.0-alpha.3/PocketConsole-v0.3.0-alpha.3.apk)
+- [Complete release workflow](https://github.com/choijunhuk/pocket-console/actions/runs/43700586438): all nine jobs passed.
+- Source: `597b5325d84ed9f5e2cebbd350121d4cc5e3a607`; package `dev.pocketconsole`, code `6`, name `0.3.0-alpha.3`
+- APK: 77,028,445 bytes; SHA-256 `fc96434f5ef07beb71412d0c51b9e4c96f2ab726a5cf0b8b7c8430445067aac8`
+- Source archive SHA-256: `0b733cf3d78801433298739b4a8a8e35b5c4923dd49e733379047a33df70a90d`
+- Signer SHA-256 (DER): `e95c85ff0887c8bbcaebdb90238f4b6dd4ce0b8b5245f6b59c2aa15c49c5320a`, unchanged from earlier official alphas.
+
+Independent download audit passed for all six GitHub digests, SHA256SUMS, manifests/source commit, APK signature/version, both core licenses, ZIP alignment and every native ELF's 16KB alignment. Release Android evidence contains `DS_ANDROID_SMOKE_PASS`, `DS_DISPLAY_LAYOUT_PASS` and `THREEDS_DISPLAY_UI_PASS (layout only)`.
+
+Both real 3DS host cores pass their unchanged game-output/input/audio assertions. Android 3DS remains explicitly `NOT_RUN_EXPERIMENTAL`. See [player display verification](player-display-verification.md) for actual fullscreen/touch/Back and compact/large-font screenshots. Physical-device compatibility, haptics and sustained performance remain deferred.
+
 ## 0.3.0-alpha.2
 
 Published 2026-11-15 06:23:09 UTC as a private GitHub prerelease.

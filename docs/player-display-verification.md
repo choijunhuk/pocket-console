@@ -11,9 +11,14 @@ Source change: `a0d9e02`, 2026-11-15. Local QA used a separate API36 ARM64 emula
 | Root-dispatched resized touch and two-pointer direction+A input | PASS, actual native frame becomes green while A is held |
 | Back leaves fullscreen, held inputs clear, save/exit and fresh session | PASS |
 | 360×640 and 640×360dp, font scale 1.3, light/dark | PASS: actual rendered captures and 48dp control-bound checks |
+| 800×1280dp tablet and device rotation | PASS: same native/UI assertions after emulator display rotation; target36's large-screen policy ignores forced Activity orientation |
 | 3DS control layout and error-path Back | PASS: separate-process UI without opening a ROM; this is not 3DS emulation acceptance |
 | Source review and visual verdict | No remaining scoped blocker; final visual verdict 93/100 |
 | Physical handset, gesture feel and legacy API26–29 runtime | NOT_RUN |
+
+The signed alpha.3 release then passed all nine gates in [run 43700586438](https://github.com/choijunhuk/pocket-console/actions/runs/43700586438), including the new display instrumentation on the release APK. All six published assets were downloaded and independently verified. Android 3DS game execution remains separate from the UI-only check.
+
+Tablet QA rotated the emulator's device state rather than opting out of [Android 16's large-screen orientation policy](https://developer.android.com/about/versions/16/behavior-changes-16). The earlier Activity-forced orientation probe timed out; the later device-rotation run passed without changing the app's orientation policy or pixel checks.
 
 ## Rendered evidence
 
