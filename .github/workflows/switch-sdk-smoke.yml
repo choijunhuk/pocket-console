@@ -11,7 +11,7 @@ on:
       sdk_run_id:
         description: Successful switch-sdk.yml run containing the verified runtime closure
         required: false
-        default: '43094135185'
+        default: '43235268180'
       nro_run_id:
         description: Successful switch-homebrew.yml run containing the original NRO
         required: false
@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      SDK_RUN_ID: ${{ inputs.sdk_run_id || '43094135185' }}
+      SDK_RUN_ID: ${{ inputs.sdk_run_id || '43235268180' }}
       NRO_RUN_ID: ${{ inputs.nro_run_id || '43087284012' }}
     steps:
       - uses: actions/checkout@v4
@@ -97,6 +97,17 @@ jobs:
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" | grep "package: name='dev.pocketconsole.sdkprobe'"
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump xmltree "$test_apk" AndroidManifest.xml | grep 'SwitchSdkSmokeInstrumentation'
           unzip -Z1 "$test_apk" | grep '^assets/smoke.nro$' >/dev/null
+      - name: Free rebuildable SDK smoke files before emulator
+        run: |
+          set -euo pipefail
+          apk=tests/android-switch-sdk/app/build/outputs/apk/debug/app-debug.apk
+          test_apk=tests/android-switch-sdk/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          for path in .cache/switch-sdk-download tests/android-switch-sdk/.cache/sdk/runtime tests/android-switch-sdk/app/build/intermediates; do
+            if [ -e "$path" ]; then du -sh "$path"; fi
+          done
+          rm -rf -- .cache/switch-sdk-download tests/android-switch-sdk/.cache/sdk/runtime tests/android-switch-sdk/app/build/intermediates
+          test -s "$apk" && test -s "$test_apk"
+          df -h .
       - name: Enable emulator acceleration
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules

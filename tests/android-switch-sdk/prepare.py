@@ -16,6 +16,7 @@ PRODUCTION_JAVA = (
     "dev/pocketconsole/DeviceCapabilities.java",
     "dev/pocketconsole/DeviceProbe.java",
     "dev/pocketconsole/Switch2PlayerActivity.java",
+    "dev/pocketconsole/SwitchSessionStop.java",
     "org/yuzu/yuzu_emu/NativeLibrary.java",
     "org/yuzu/yuzu_emu/features/input/NativeInput.java",
     "org/yuzu/yuzu_emu/applets/keyboard/SoftwareKeyboard.java",

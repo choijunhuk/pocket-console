@@ -28,7 +28,7 @@ but the device's Vulkan prerequisite is below 1.3; it is not game or graphics
 acceptance. Missing capability data and native failures remain failures or
 explicit unknown states. A physical ARM64 device is still needed for device
 performance and broader game compatibility.
-The initial SDK artifact is a linkage baseline at producer commit
-`e98c5b8922f5dfab656129935656ec3c7230237f`; it has known stop-during-init and
-pending-keyboard lifecycle risks under repair. This smoke does not clear those
-risks or authorize release.
+The default SDK artifact is successful run `43235268180` at producer commit
+`fbee5561d8dc9b090ae01fdea5a11333dbdd38d4`. Its generation-fenced native
+API and Java cancellation have local test coverage; Android runtime acceptance
+is pending. This smoke does not authorize release.

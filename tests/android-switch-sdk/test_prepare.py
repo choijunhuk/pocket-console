@@ -52,11 +52,12 @@ class PrepareTest(unittest.TestCase):
         self.assertEqual((self.stage_root / ".cache/sdk/runtime/arm64-v8a"
                           / self.binary.name).read_bytes(), self.binary.read_bytes())
         self.assertTrue((self.stage_root / ".cache/sdl-java/org/libsdl/app/SDL.java").is_file())
+        session_stop = "dev/pocketconsole/SwitchSessionStop.java"
         self.assertTrue((self.stage_root / ".cache/linked-java"
-                         / prepare.PRODUCTION_JAVA[0]).is_symlink())
+                         / session_stop).is_symlink())
         self.assertEqual((self.stage_root / ".cache/linked-java"
-                          / prepare.PRODUCTION_JAVA[0]).resolve(),
-                         (self.base / "app/src/main/java" / prepare.PRODUCTION_JAVA[0]).resolve())
+                          / session_stop).resolve(),
+                         (self.base / "app/src/main/java" / session_stop).resolve())
         self.assertEqual((self.stage_root / ".cache/test-assets/smoke.nro").read_bytes(),
                          self.nro.read_bytes())
 
