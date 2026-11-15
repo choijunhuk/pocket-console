@@ -1,6 +1,6 @@
 # Pocket Console
 
-[Android 알파 APK 다운로드](https://github.com/choijunhuk/pocket-console/releases/tag/v0.3.0-alpha.2) · Android 8.0+ ARM64/x86_64. 비공개 저장소 접근 권한이 있는 GitHub 로그인이 필요합니다. DS·UI와 3DS 호스트 검증을 통과했으며, 3DS Android 기기 실행과 Switch 계열은 개발 중입니다.
+[Android 알파 APK 다운로드](https://github.com/choijunhuk/pocket-console/releases/tag/v0.3.0-alpha.3) · Android 8.0+ ARM64/x86_64. 비공개 저장소 접근 권한이 있는 GitHub 로그인이 필요합니다. DS·UI와 3DS 호스트 검증을 통과했으며, 3DS Android 기기 실행과 Switch 계열은 개발 중입니다.
 
 Android에서 **DS · 3DS · Switch · Switch 2를 실제 휴대용 게임기처럼 다루는 경험**을 목표로 하는 프로젝트입니다.
 
@@ -12,6 +12,8 @@ Android에서 **DS · 3DS · Switch · Switch 2를 실제 휴대용 게임기처
 - 버튼 눌림과 입력 상태를 확인하는 **조작 미리보기**
 - DS 파일의 실제 두 화면 출력, 아래 화면 터치, 동시 버튼 입력 및 스테레오 오디오
 - 세로/가로 DS 플레이 화면, 일시 중지/재개 및 게임 내 저장 경로
+- DS·3DS 전체화면, 큰 주 화면+작은 보조 화면, 한 화면 보기와 위/아래 화면 교체
+- 화면 비율을 유지하는 자동 배치, 전체화면 버튼 숨김과 기종별 화면 설정 기억
 - Android 파일 선택기로 게임 문서를 등록하는 로컬 보관함
 - 파일 확장자에 따른 기종 구분, 중복 URI 방지, 앱 재시작 후 목록 유지
 - 밝은/어두운 테마, 글씨 크기 대응, 눌림 피드백과 시스템 설정을 따르는 진동
@@ -52,6 +54,8 @@ GitHub Actions의 **Android** 워크플로도 동일한 검사 후 `pocket-conso
 Switch 빌드/부팅 가능성은 초기 기술 검증 대상으로 먼저 확인합니다. 실제 기능 추가는 DS → 3DS → Switch 순서로 진행합니다. 모든 휴대폰이나 모든 게임의 동작을 보장하는 계획은 아닙니다.
 
 상세: [디자인 기준](DESIGN.md), [구조와 코어 후보](docs/architecture.md), [DS 검증 기록](docs/ds-verification.md), [3DS·UI 검증과 실제 캡처](docs/3ds-verification.md).
+
+전체화면은 플레이어 위의 **전체화면**에서 켭니다. **메뉴 → 화면 배치**에서 두 화면·큰 주 화면+보조 화면·주 화면만을 선택하고, **위/아래 화면 바꾸기**로 주 화면을 교체합니다. 버튼을 숨겨도 메뉴는 남으며, Android 뒤로 가기는 먼저 일반 화면으로 돌아갑니다. [화면 배치 검증과 캡처](docs/player-display-verification.md)를 참고하세요.
 
 ## 파일과 소스
 
