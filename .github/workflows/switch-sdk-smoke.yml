@@ -133,6 +133,9 @@ jobs:
             switch-sdk-installed-abi.txt
             switch-sdk-smoke.log
             switch-sdk-logcat.txt
+            switch-sdk-crash-logcat.txt
+            switch-sdk-processes.txt
+            switch-sdk-activities.txt
             switch-sdk-status.txt
             switch-sdk-first-frame.png
             switch-sdk-a-pressed.png

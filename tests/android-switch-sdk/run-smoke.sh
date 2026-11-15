@@ -1,5 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
+capture_failure() {
+  status=$?
+  trap - EXIT
+  if (( status != 0 )); then
+    timeout 15s adb logcat -d -b all > switch-sdk-crash-logcat.txt 2>&1 || true
+    timeout 15s adb shell dumpsys activity processes > switch-sdk-processes.txt 2>&1 || true
+    timeout 15s adb shell dumpsys activity activities > switch-sdk-activities.txt 2>&1 || true
+  fi
+  exit "$status"
+}
+trap capture_failure EXIT
 apk=tests/android-switch-sdk/app/build/outputs/apk/debug/app-debug.apk
 test_apk=tests/android-switch-sdk/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 adb shell getprop ro.product.cpu.abilist | tee switch-sdk-abilist.txt
