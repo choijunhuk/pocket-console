@@ -1,10 +1,10 @@
 # Pocket Console
 
-[Android 알파 APK 다운로드](https://github.com/choijunhuk/pocket-console/releases/tag/v0.3.0-alpha.1) · Android 8.0+ ARM64/x86_64. 비공개 저장소 접근 권한이 있는 GitHub 로그인이 필요합니다. 현재 DS·UI 검증을 통과했으며, 3DS와 Switch 계열은 개발 중입니다.
+[Android 알파 APK 다운로드](https://github.com/choijunhuk/pocket-console/releases/tag/v0.3.0-alpha.2) · Android 8.0+ ARM64/x86_64. 비공개 저장소 접근 권한이 있는 GitHub 로그인이 필요합니다. DS·UI와 3DS 호스트 검증을 통과했으며, 3DS Android 기기 실행과 Switch 계열은 개발 중입니다.
 
 Android에서 **DS · 3DS · Switch · Switch 2를 실제 휴대용 게임기처럼 다루는 경험**을 목표로 하는 프로젝트입니다.
 
-> **현재 개발 브랜치: 0.3 통합 알파. DS 실행 검증을 유지하며 Azahar 3DS 코어와 플레이 화면을 연결했습니다. 3DS 실제 실행 수락 검증은 진행 중이고, Switch·Switch 2 실행 엔진은 아직 앱에 연결되지 않았습니다.**
+> **현재 개발 브랜치: 0.3 통합 알파. DS 실행 검증을 유지하며 3DS 검은 화면을 수정했습니다. 실제 코어의 Linux 호스트 화면·입력·오디오 검사는 통과했고, Android 기기 검증은 보류 상태입니다. Switch·Switch 2 실행 엔진은 아직 앱에 연결되지 않았습니다.**
 
 ## 지금 가능한 것
 
@@ -45,7 +45,7 @@ GitHub Actions의 **Android** 워크플로도 동일한 검사 후 `pocket-conso
 
 1. **완료한 토대:** 기기별 외형, 조작 미리보기, 로컬 보관함, 빌드 파이프라인.
 2. **현재 DS 알파:** melonDS 기반 Android 통합, 화면·터치·오디오·입력과 게임 내 저장 경로. 검증 범위는 별도 기록합니다.
-3. **3DS 통합 알파:** 소스 빌드·APK 패키징 완료, 큰 상단 화면·터치·Circle Pad 구현. 실제 홈브루 출력과 물리 기기 수락 검증 진행 중.
+3. **3DS 통합 알파:** 소스 빌드·APK 패키징 완료, 큰 상단 화면·터치·Circle Pad 구현. 실제 코어의 Linux 홈브루 화면·입력·오디오·재실행 검사 통과, Android 기기 수락 검증은 보류.
 4. **Switch 실행:** Eden 기반 Android 통합 실험 후 지원 기기/게임 범위를 정해 확장.
 5. **Switch 2 실험:** 별도 `feat/switch-backends` 브랜치에서 Hokkaido 소스 빌드 가능성을 검증. Switch 2 게임 실행 지원을 뜻하지 않습니다.
 

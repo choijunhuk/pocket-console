@@ -12,6 +12,9 @@ jobs:
     uses: ./.github/workflows/3ds-core.yml
   three-ds-homebrew:
     uses: ./.github/workflows/3ds-homebrew.yml
+  three-ds-host:
+    needs: three-ds-homebrew
+    uses: ./.github/workflows/3ds-host-smoke.yml
   ds-native-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -200,7 +203,7 @@ jobs:
           if-no-files-found: warn
 
   publish:
-    needs: [build, android-native-smoke, ds-native-smoke]
+    needs: [build, android-native-smoke, ds-native-smoke, three-ds-host]
     runs-on: ubuntu-latest
     permissions:
       contents: write
