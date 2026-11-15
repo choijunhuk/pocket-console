@@ -72,6 +72,10 @@ add_library(${pocket_sdk_target} SHARED ${sdk_sources}
     "${CMAKE_CURRENT_LIST_DIR}/emu_window.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/first_frame.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/software_keyboard.cpp")
+if(pocket_sdk_target STREQUAL "pocket_switch")
+    # Eden enables module scanning in src/, but this deferred target is created at the root.
+    set_property(TARGET ${pocket_sdk_target} PROPERTY CXX_SCAN_FOR_MODULES ON)
+endif()
 target_include_directories(${pocket_sdk_target} BEFORE PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}"
     "${CMAKE_SOURCE_DIR}/src/common/android"

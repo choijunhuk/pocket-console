@@ -77,16 +77,23 @@ class ProjectHookTests(unittest.TestCase):
                 "void multiplayer() { s_instance.System(); }\n"
             )
             (root / "src/android/app/src/main/jni/CMakeLists.txt").write_text(
+                "set(CMAKE_CXX_SCAN_FOR_MODULES ON)\n"
                 "add_library(yuzu-android SHARED native.cpp)\n"
                 "target_link_libraries(yuzu-android PRIVATE common)\n"
             )
             (root / "CMakeLists.txt").write_text(
                 "cmake_minimum_required(VERSION 3.19)\n"
                 "project(HokkaidoProbe LANGUAGES CXX)\n"
+                "set(CMAKE_CXX_SCAN_FOR_MODULES OFF)\n"
                 "add_library(common STATIC src/common/common.cpp)\n"
                 "target_sources(common PUBLIC src/common/android/id_cache.cpp)\n"
                 "target_sources(common PUBLIC src/common/android/applets/software_keyboard.cpp)\n"
                 "add_subdirectory(src/android/app/src/main/jni)\n"
+                "if(POCKET_SDK_TARGET STREQUAL pocket_switch)\n"
+                "file(GENERATE OUTPUT ${CMAKE_BINARY_DIR}/sdk-module-scan.txt "
+                "CONTENT \"$<TARGET_PROPERTY:yuzu-android,CXX_SCAN_FOR_MODULES>|"
+                "$<TARGET_PROPERTY:pocket_switch,CXX_SCAN_FOR_MODULES>\")\n"
+                "endif()\n"
             )
             build = root / "build"
             result = subprocess.run(
@@ -135,6 +142,7 @@ class ProjectHookTests(unittest.TestCase):
                              json.loads((eden_build / "compile_commands.json").read_text())}
             self.assertIn(HOOK.parent / "id_cache.cpp", eden_compiled)
             self.assertNotIn(root / "src/common/android/id_cache.cpp", eden_compiled)
+            self.assertEqual((eden_build / "sdk-module-scan.txt").read_text(), "ON|ON")
 
     def test_unreviewed_native_target_stops_before_toolchain_setup(self):
         script = HOOK.parents[2] / "scripts/build-switch-probe.sh"
