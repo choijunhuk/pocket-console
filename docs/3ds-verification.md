@@ -13,7 +13,7 @@ Updated 2026-11-15. Source builds, emulator UI, and physical-device game compati
 | 3DS Android test registration | PASS in run 43044950424: separate DS/3DS test APK manifests contain the selected runners. 3DS execution remains skipped by the graphics prerequisite. |
 | 3DS Android runtime | NOT_RUN on the GLES 3.0 CI emulator in run 43238203790. Azahar's OpenGL path requires GLES 3.2. A declared sufficient version must still pass the unchanged native actual-context, colors, input, audio, and shutdown assertions. |
 | Physical phone, game compatibility, save/relaunch | NOT_RUN. Galaxy S23 Ultra is the user's reference phone; no model whitelist or game compatibility promise is inferred. |
-| Switch / Switch 2 | Separate experimental branches: the Pocket Console Hokkaido ARM64 SDK and runtime dependency closure passed [run 43235268180](https://github.com/choijunhuk/pocket-console/actions/runs/43235268180). Eden adapter verification continues. These engines are not connected to the released app; no device or game compatibility claim. |
+| Switch / Switch 2 | Separate experimental branches: the Pocket Console Hokkaido ARM64 SDK and runtime dependency closure passed [run 43235268180](https://github.com/choijunhuk/pocket-console/actions/runs/43235268180). The Eden own AArch64 SDK and source metadata passed [run 43683248189](https://github.com/choijunhuk/pocket-console/actions/runs/43683248189). These engines are not connected to the released app; no device or game compatibility claim. |
 
 The Android harness records insufficient GLES as `THREEDS_ANDROID_SMOKE_NOT_RUN_GLES`, never a 3DS pass. Missing capability data is an error. UI/DS checks can pass independently; Android 3DS release acceptance still requires a suitable physical device.
 
