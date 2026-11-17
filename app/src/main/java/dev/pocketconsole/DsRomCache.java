@@ -17,6 +17,11 @@ final class DsRomCache {
     private DsRomCache() { }
 
     static synchronized File copy(InputStream source, File directory) throws IOException {
+        return copy(source, directory, -1, null);
+    }
+
+    static synchronized File copy(InputStream source, File directory, long expectedSize,
+                                  PreparationProgress progress) throws IOException {
         Files.createDirectories(directory.toPath());
         Path temporary = Files.createTempFile(directory.toPath(), "ds-", ".tmp");
         try {
@@ -24,6 +29,7 @@ final class DsRomCache {
             try { digest = MessageDigest.getInstance("SHA-256"); }
             catch (NoSuchAlgorithmException e) { throw new IOException("SHA-256 unavailable", e); }
             long length = 0;
+            if (progress != null) progress.update("파일 복사", 0, expectedSize);
             try (java.io.OutputStream output = Files.newOutputStream(temporary)) {
                 byte[] buffer = new byte[8192];
                 int count;
@@ -41,15 +47,17 @@ final class DsRomCache {
                     if (length > MAX_BYTES) throw new IOException("DS ROM exceeds 512 MiB");
                     digest.update(buffer, 0, count);
                     output.write(buffer, 0, count);
+                    if (progress != null) progress.update("파일 복사", length, expectedSize);
                 }
             }
             checkInterrupted();
+            if (progress != null) progress.update("파일 검사", 0, 0);
             validate(temporary.toFile(), length);
             StringBuilder name = new StringBuilder(68);
             for (byte value : digest.digest()) name.append(String.format("%02x", value & 0xff));
             Path target = directory.toPath().resolve(name + ".nds");
             if (Files.exists(target) && Files.size(target) == length
-                    && valid(target.toFile(), length, name.toString())) {
+                    && valid(target.toFile(), length, name.toString(), progress)) {
                 checkInterrupted();
                 return target.toFile();
             }
@@ -64,18 +72,27 @@ final class DsRomCache {
     }
 
     private static boolean valid(File file, long length, String expectedDigest) throws IOException {
+        return valid(file, length, expectedDigest, null);
+    }
+
+    private static boolean valid(File file, long length, String expectedDigest,
+                                 PreparationProgress progress) throws IOException {
         try {
             checkInterrupted();
             validate(file, length);
+            if (progress != null) progress.update("기존 캐시 확인", 0, length);
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             try (InputStream input = Files.newInputStream(file.toPath())) {
                 byte[] buffer = new byte[8192];
                 int count;
+                long checked = 0;
                 while (true) {
                     checkInterrupted();
                     count = input.read(buffer);
                     if (count == -1) break;
                     digest.update(buffer, 0, count);
+                    checked += count;
+                    if (progress != null) progress.update("기존 캐시 확인", checked, length);
                 }
             }
             checkInterrupted();

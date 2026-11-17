@@ -19,11 +19,31 @@ public final class ThreeDsRomCacheTest {
         byte[] elf = elf();
         byte[] ncch = ncch();
         byte[] ncsd = ncsd();
-        File xFile = copy(x, dir, ".3dsx");
+        PreparationProgress progress = new PreparationProgress();
+        File xFile = ThreeDsRomCache.copy(new ByteArrayInputStream(x), dir, x.length, progress);
+        check(progress.message().contains("파일 검사"), "new file validation stage missing");
+        check(Arrays.equals(x, Files.readAllBytes(xFile.toPath())), "cached bytes changed");
+        PreparationProgress copying = new PreparationProgress();
+        File observed = ThreeDsRomCache.copy(new ByteArrayInputStream(x) {
+            private boolean checked;
+            @Override public synchronized int read(byte[] bytes, int offset, int size) {
+                if (checked && available() == 64) {
+                    check(copying.message().contains("파일 복사 50%"), "mid-copy progress missing");
+                    checked = false;
+                }
+                int count = super.read(bytes, offset, Math.min(size, 64));
+                if (count > 0) checked = true;
+                return count;
+            }
+        }, dir, x.length, copying);
+        check(xFile.equals(observed), "observed copy did not dedupe");
         copy(elf, dir, ".elf");
         copy(ncch, dir, ".cxi");
         copy(ncsd, dir, ".cci");
         check(xFile.equals(copy(x, dir, ".3dsx")), "same bytes must dedupe");
+        check(xFile.equals(ThreeDsRomCache.copy(new ByteArrayInputStream(x), dir, x.length, progress)),
+                "progress-enabled cache must dedupe");
+        check(progress.message().contains("기존 캐시 확인 100%"), "existing cache verification progress missing");
         byte[] changed = x.clone(); changed[100]++;
         check(!xFile.equals(copy(changed, dir, ".3dsx")), "different bytes must not collide");
         byte[] corrupted = x.clone(); corrupted[100]++;
@@ -43,6 +63,10 @@ public final class ThreeDsRomCacheTest {
         byte[] encryptedNcsd = ncsd.clone(); encryptedNcsd[512 + 0x18f] = 0;
         expectFailure(encryptedNcsd, dir);
         expectFailure(new byte[511], dir);
+        try { ThreeDsRomCache.copy(new ByteArrayInputStream(new byte[511]), dir, 511, progress);
+            throw new AssertionError("invalid progress copy was accepted"); }
+        catch (IOException expected) { checks++; }
+        check(progress.message().contains("파일 검사"), "failed copy did not reach validation");
         try { ThreeDsRomCache.copy(new InputStream() {
             private int reads;
             @Override public int read() throws IOException {
@@ -72,7 +96,7 @@ public final class ThreeDsRomCacheTest {
                     }
                     return count;
                 }
-            }, dir); throw new AssertionError("midstream interruption was accepted"); }
+            }, dir, x.length, progress); throw new AssertionError("midstream interruption was accepted"); }
             catch (InterruptedIOException expected) { checks++; }
         } finally { Thread.interrupted(); }
         check(dir.listFiles().length == 5, "midstream interruption left a temporary file");

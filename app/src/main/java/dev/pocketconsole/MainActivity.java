@@ -170,13 +170,13 @@ public final class MainActivity extends Activity {
     }
 
     private String readiness(ConsoleType type) {
-        if (type == ConsoleType.SWITCH_TWO) return "실험적 지원 · 엔진 준비 중";
-        if (type == ConsoleType.SWITCH) return "엔진 준비 중";
+        if (type == ConsoleType.SWITCH_TWO || type == ConsoleType.SWITCH) return "현재 실행 불가 · 엔진 미연결";
         DeviceCapabilities.Compatibility check = compatibility(type);
         if (check.state == DeviceCapabilities.Compatibility.State.UNSUPPORTED) return "기기 조건 미충족";
-        if (check.state == DeviceCapabilities.Compatibility.State.UNKNOWN) return "기기 조건 확인 중";
+        if (check.state == DeviceCapabilities.Compatibility.State.UNKNOWN) return "기기 조건 확인 불가";
+        if (type == ConsoleType.THREE_DS && !threeDsPresenceChecked) return "엔진 확인 중";
         if (type == ConsoleType.THREE_DS) return threeDsPackaged
-                ? "실험적 실행 · 호환성 미확인" : "엔진 준비 중";
+                ? "실험적 실행 · 호환성 미확인" : "현재 실행 불가 · 엔진 없음";
         return "실행 가능";
     }
 
@@ -327,9 +327,9 @@ public final class MainActivity extends Activity {
                 ? "3DS 엔진 패키지를 확인하고 있어요."
                 : selected == ConsoleType.THREE_DS && !threeDsPackaged
                 && check.state == DeviceCapabilities.Compatibility.State.READY
-                ? "3DS 엔진이 이 빌드에 없어요. 설치 후 실제 실행을 확인합니다."
+                ? "3DS 엔진이 이 빌드에 없어요. 기다려도 실행되지 않으며, 엔진이 포함된 빌드가 필요해요."
                 : (selected == ConsoleType.DS || selected == ConsoleType.THREE_DS)
-                ? check.reason : "게임 실행 엔진은 아직 연결되지 않았어요.";
+                ? check.reason : "게임 실행 엔진이 아직 연결되지 않았어요. 기다려도 실행되지 않으며, 현재는 파일 등록과 조작 미리보기만 가능해요.";
         page.addView(text(detail, 13, QUIET, false));
         gap(page, 12);
         Button importButton = button("파일 가져오기", ORANGE, ui.onAccent);
@@ -382,7 +382,7 @@ public final class MainActivity extends Activity {
 
     private void drawEntry(LibraryStore.Entry entry) {
         boolean canPlay = launchable(entry.console);
-        String action = canPlay ? (entry.console == ConsoleType.THREE_DS ? "실험적 실행" : "실행") : "준비 중";
+        String action = canPlay ? (entry.console == ConsoleType.THREE_DS ? "실험적 실행" : "실행") : "실행 불가";
         String accessibleAction = canPlay ? (entry.console == ConsoleType.THREE_DS
                 ? "실험적 실행, 게임 호환성 미확인" : "게임 실행") : readiness(entry.console);
         Button item = button(entry.name + "  ·  " + action, ui.raised, INK);
@@ -494,7 +494,7 @@ public final class MainActivity extends Activity {
                             : "게임 실행 엔진을 아직 사용할 수 없어요.";
                     new AlertDialog.Builder(activity).setTitle(activity.readiness(entry.console))
                             .setMessage(entry.name + "\n\n" + reason
-                                    + " 조작 미리보기에서 버튼 배치만 확인할 수 있어요.")
+                                    + " 기다려도 자동으로 실행되지 않아요. 조작 미리보기에서 버튼 배치만 확인할 수 있어요.")
                             .setPositiveButton("조작 미리보기", (dialog, which) -> { activity.selected = entry.console; activity.preview = true; activity.render(); })
                             .setNegativeButton("닫기", null).show();
                 } else {
