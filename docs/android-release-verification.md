@@ -1,5 +1,23 @@
 # Android release verification
 
+## 0.3.0-alpha.4
+
+Published 2026-11-17 11:00:35 UTC as a public GitHub prerelease.
+
+- [Release and assets](https://github.com/choijunhuk/pocket-console/releases/tag/v0.3.0-alpha.4)
+- [Download APK](https://github.com/choijunhuk/pocket-console/releases/download/v0.3.0-alpha.4/PocketConsole-v0.3.0-alpha.4.apk)
+- [Complete release workflow](https://github.com/choijunhuk/pocket-console/actions/runs/44067378214): all nine jobs passed.
+- Source: `900595ed55bcbb3f01b44be0f201d4db4231f2f9`; package `dev.pocketconsole`, code `7`, name `0.3.0-alpha.4`
+- APK: 77,028,445 bytes; SHA-256 `d14ecbc1cad9b3c02130620cad6e38dd2a6356e4c5db67c5f9648859a1c7f29b`
+- Source archive SHA-256: `a57be51ec72c625ad8748d61229bce4521fea10b4cd6ac7f720daeae0a588796`
+- Signer SHA-256 (DER): `e95c85ff0887c8bbcaebdb90238f4b6dd4ce0b8b5245f6b59c2aa15c49c5320a`, unchanged from earlier official alphas.
+
+Independent public downloads passed for all six GitHub asset digests and matched the CI artifact bytes. SHA256SUMS, both manifests, official v2 signature, non-debuggable package/version/SDK/ABI metadata, ZIP alignment and every native ELF's 16KB alignment passed. The corresponding source archive contains both core licenses and matches all 19 tracked files changed since alpha3 to the tagged source commit; the APK contains `PreparationProgress`.
+
+Actual logs contain `DS_SAVE_FLUSH_PASS`, `DS_NATIVE_SMOKE_PASS`, `THREEDS_NATIVE_SMOKE_PASS` in both 3DS host paths, `DS_ANDROID_SMOKE_PASS`, `DS_DISPLAY_LAYOUT_PASS` and `THREEDS_DISPLAY_UI_PASS (layout only)`.
+
+Android 3DS game execution remains explicitly `THREEDS_ANDROID_SMOKE_NOT_RUN_EXPERIMENTAL`. Physical-device update/save preservation, haptics, sustained performance and commercial-game compatibility were not tested. The stable signer and increased version code establish Android update eligibility without uninstalling the existing official app. Switch/Switch 2 execution and DLC installation are not included.
+
 ## 0.3.0-alpha.3
 
 Published 2026-11-15 10:01:52 UTC as a private GitHub prerelease.
