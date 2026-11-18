@@ -1,6 +1,7 @@
 package dev.pocketconsole;
 
 import android.app.Activity;
+import android.app.ActivityManager;
 import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
@@ -14,6 +15,7 @@ import android.os.Bundle;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.ResultReceiver;
 import android.os.ParcelFileDescriptor;
 import android.provider.OpenableColumns;
 import android.content.ContentResolver;
@@ -32,7 +34,6 @@ import android.widget.TextView;
 import java.io.FileNotFoundException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.io.RandomAccessFile;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.lang.ref.WeakReference;
@@ -44,11 +45,17 @@ import java.util.concurrent.Executors;
 import java.util.zip.ZipFile;
 import java.io.File;
 import java.io.IOException;
-import org.yuzu.yuzu_emu.NativeLibrary;
 
 public final class MainActivity extends Activity {
     private static final int PICK_FILE = 10;
     private static final int PLAY_SWITCH = 11;
+    private static final String KEY_SWITCH_NRO = "active_switch_nro";
+    private static final ExecutorService SWITCH_IO = Executors.newSingleThreadExecutor();
+    private static String switchProbeDiagnostic;
+    private static String switchProbeWarning = "";
+    private static boolean switchLaunching;
+    private SwitchNroPreparation switchCopy;
+    private static File switchNro;
     private int PAPER, INK, QUIET, ORANGE, SHELL;
     private ConsoleUi ui;
     private DeviceCapabilities capabilities;
@@ -100,11 +107,18 @@ public final class MainActivity extends Activity {
             ConsoleType restored = consoleForId(state.getString(KEY_CONSOLE));
             if (restored != null) selected = restored;
             preview = state.getBoolean(KEY_PREVIEW);
+            String active = state.getString(KEY_SWITCH_NRO);
+            if (active != null) {
+                switchNro = new File(active);
+                switchLaunching = true;
+            }
         } else {
             ConsoleType restored = consoleForId(uiPreferences.getString(KEY_CONSOLE, null));
             if (restored != null) selected = restored;
         }
+        sweepSwitchNros();
         render();
+        checkSwitchBackend();
         Context app = getApplicationContext();
         DOCUMENT_IO.execute(() -> {
             boolean packaged = hasThreeDsCore(app);
@@ -116,23 +130,62 @@ public final class MainActivity extends Activity {
                 }
             });
         });
-        DOCUMENT_IO.execute(() -> {
-            boolean packaged = hasSwitchCore(app);
-            DeviceCapabilities.Compatibility support = capabilities.check(ConsoleType.SWITCH);
-            String diagnostic = !packaged ? "Switch 엔진이 이 빌드에 없어요."
-                    : support.state != DeviceCapabilities.Compatibility.State.READY
-                    ? support.reason : NativeLibrary.switchVulkanDiagnostic();
-            String warning = diagnostic.isEmpty() ? NativeLibrary.switchVulkanWarning() : "";
-            MAIN.post(() -> {
-                if (!isDestroyed() && !isFinishing()) {
-                    switchPackaged = packaged;
-                    switchDiagnostic = diagnostic;
-                    switchWarning = warning;
-                    switchPresenceChecked = true;
-                    if (!preview) render();
+    }
+
+    private void checkSwitchBackend() {
+        switchPackaged = hasSwitchCore(getApplicationContext());
+        DeviceCapabilities.Compatibility support = capabilities.check(ConsoleType.SWITCH);
+        if (!switchPackaged || support.state != DeviceCapabilities.Compatibility.State.READY) {
+            switchDiagnostic = !switchPackaged ? "Switch 엔진이 이 빌드에 없어요." : support.reason;
+            switchPresenceChecked = true;
+            render();
+            return;
+        }
+        if (switchProbeDiagnostic != null) {
+            switchDiagnostic = switchProbeDiagnostic;
+            switchWarning = switchProbeWarning;
+            switchPresenceChecked = true;
+            render();
+            return;
+        }
+        WeakReference<MainActivity> target = new WeakReference<>(this);
+        final boolean[] completed = {false};
+        Runnable deadline = () -> {
+            if (completed[0]) return;
+            completed[0] = true;
+            MainActivity activity = target.get();
+            if (activity == null || activity.isDestroyed() || activity.isFinishing()) return;
+            activity.switchDiagnostic = "Switch 그래픽 진단이 응답하지 않아 중단했어요. 다시 실행해 주세요.";
+            activity.switchPresenceChecked = true;
+            if (!activity.preview) activity.render();
+        };
+        MAIN.postDelayed(deadline, 12_000);
+        ResultReceiver receiver = new ResultReceiver(MAIN) {
+            @Override protected void onReceiveResult(int code, Bundle data) {
+                if (completed[0]) return;
+                completed[0] = true;
+                MAIN.removeCallbacks(deadline);
+                String diagnostic = data == null ? null : data.getString(SwitchProbeService.DIAGNOSTIC);
+                String warning = data == null ? "" : data.getString(SwitchProbeService.WARNING, "");
+                if (diagnostic == null) diagnostic = "Switch 그래픽 진단 결과를 확인하지 못했어요.";
+                if (code == 0) {
+                    switchProbeDiagnostic = diagnostic;
+                    switchProbeWarning = warning;
                 }
-            });
-        });
+                MainActivity activity = target.get();
+                if (activity == null || activity.isDestroyed() || activity.isFinishing()) return;
+                activity.switchDiagnostic = diagnostic;
+                activity.switchWarning = warning;
+                activity.switchPresenceChecked = true;
+                if (!activity.preview) activity.render();
+            }
+        };
+        try { SwitchProbeService.start(getApplicationContext(), receiver); }
+        catch (RuntimeException error) {
+            Bundle data = new Bundle();
+            data.putString(SwitchProbeService.DIAGNOSTIC, "Switch 그래픽 진단 프로세스를 시작하지 못했어요.");
+            receiver.send(1, data);
+        }
     }
 
     @Override protected void onResume() {
@@ -151,6 +204,7 @@ public final class MainActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        if (switchCopy != null) switchCopy.cancel();
         if (Build.VERSION.SDK_INT >= 33 && backRegistered) {
             BackApi33.unregister(this, previewBack);
             backRegistered = false;
@@ -237,6 +291,7 @@ public final class MainActivity extends Activity {
     @Override protected void onSaveInstanceState(Bundle out) {
         out.putString(KEY_CONSOLE, selected.id);
         out.putBoolean(KEY_PREVIEW, preview);
+        if (switchNro != null) out.putString(KEY_SWITCH_NRO, switchNro.getAbsolutePath());
         super.onSaveInstanceState(out);
     }
 
@@ -244,7 +299,8 @@ public final class MainActivity extends Activity {
     @android.annotation.SuppressLint("GestureBackNavigation")
     @Override public void onBackPressed() {
         if (Build.VERSION.SDK_INT >= 33) { super.onBackPressed(); return; }
-        if (preview) { preview = false; render(); }
+        if (switchCopy != null) cancelSwitchPreparation();
+        else if (preview) { preview = false; render(); }
         else super.onBackPressed();
     }
 
@@ -296,10 +352,10 @@ public final class MainActivity extends Activity {
     private void render() {
         noticeView = null;
         if (Build.VERSION.SDK_INT >= 33) {
-            if (preview && !backRegistered) {
+            if ((preview || switchCopy != null) && !backRegistered) {
                 previewBack = BackApi33.register(this);
                 backRegistered = true;
-            } else if (!preview && backRegistered) {
+            } else if (!preview && switchCopy == null && backRegistered) {
                 BackApi33.unregister(this, previewBack);
                 previewBack = null;
                 backRegistered = false;
@@ -408,6 +464,11 @@ public final class MainActivity extends Activity {
             message.setPadding(dp(12), dp(12), dp(12), dp(12));
             message.setBackground(shape(ui.notice, 12));
             page.addView(message);
+            if (switchCopy != null) {
+                Button cancel = button("준비 취소", SHELL, INK);
+                cancel.setOnClickListener(v -> cancelSwitchPreparation());
+                page.addView(cancel, new LinearLayout.LayoutParams(-1, dp(48)));
+            }
             gap(page, 12);
         }
         List<LibraryStore.Entry> entries = library.entries(selected);
@@ -470,6 +531,8 @@ public final class MainActivity extends Activity {
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
         if (request == PLAY_SWITCH) {
+            deleteSwitchNro();
+            switchLaunching = false;
             if (data != null) showNotice(data.getStringExtra(Switch2PlayerActivity.EXTRA_FAILURE));
             return;
         }
@@ -581,59 +644,67 @@ public final class MainActivity extends Activity {
         });
     }
 
+    private void cancelSwitchPreparation() {
+        if (switchCopy == null) return;
+        switchCopy.cancel();
+        showNotice("Switch 파일 준비를 취소하고 있어요.");
+    }
+
+    private void deleteSwitchNro() {
+        if (switchNro != null) switchNro.delete();
+        switchNro = null;
+    }
+
+    private void sweepSwitchNros() {
+        // A second library instance must not unlink a live player's private copy.
+        ActivityManager manager = getSystemService(ActivityManager.class);
+        List<ActivityManager.RunningAppProcessInfo> processes = manager.getRunningAppProcesses();
+        if (processes == null) return;
+        for (ActivityManager.RunningAppProcessInfo process : processes) {
+            if ((getPackageName() + ":switch2").equals(process.processName)) return;
+        }
+        File[] stale = getCacheDir().listFiles((directory, name) ->
+                name.startsWith("switch-nro-") && name.endsWith(".nro"));
+        if (stale != null) for (File file : stale) {
+            if (!file.equals(switchNro)) file.delete();
+        }
+    }
+
     private void launchSwitchHomebrew(LibraryStore.Entry entry) {
+        if (switchLaunching) return;
+        switchLaunching = true;
+        SwitchNroPreparation copy = new SwitchNroPreparation();
+        switchCopy = copy;
         Context app = getApplicationContext();
         WeakReference<MainActivity> target = new WeakReference<>(this);
         PreparationProgress preparation = new PreparationProgress();
-        showNotice(preparation.message(false));
-        WeakReference<TextView> progressTarget = new WeakReference<>(noticeView);
+        showNotice(preparation.message());
         Runnable loading = new Runnable() {
             @Override public void run() {
                 MainActivity activity = target.get();
-                if (activity == null || activity.isDestroyed() || activity.isFinishing()) return;
-                TextView message = progressTarget.get();
-                if (message == null || activity.noticeView != message) return;
-                activity.notice = preparation.message(false);
-                message.setText(activity.notice);
+                if (activity == null || activity.isDestroyed() || activity.isFinishing()
+                        || activity.switchCopy != copy) return;
+                activity.notice = preparation.message();
+                TextView message = activity.noticeView;
+                if (message != null) message.setText(activity.notice);
                 MAIN.postDelayed(this, 500);
             }
         };
         MAIN.post(loading);
-        DOCUMENT_IO.execute(() -> {
+        SWITCH_IO.execute(() -> {
             File copied = null;
             String error = null;
             try (InputStream source = app.getContentResolver().openInputStream(Uri.parse(entry.uri))) {
+                copy.checkCancelled();
                 if (source == null) throw new IOException("파일을 열 수 없어요.");
                 Path path = Files.createTempFile(app.getCacheDir().toPath(), "switch-nro-", ".nro");
                 copied = path.toFile();
-                preparation.update("파일 복사", 0, -1);
                 try (OutputStream output = Files.newOutputStream(path)) {
-                    byte[] buffer = new byte[64 * 1024];
-                    long size = 0;
-                    int count;
-                    while ((count = source.read(buffer)) != -1) {
-                        if (count == 0) {
-                            int one = source.read();
-                            if (one == -1) break;
-                            buffer[0] = (byte) one;
-                            count = 1;
-                        }
-                        if (count > 2L * 1024 * 1024 * 1024 - size)
-                            throw new IOException("NRO 파일이 2 GiB를 넘습니다.");
-                        output.write(buffer, 0, count);
-                        size += count;
-                        preparation.update("파일 복사", size, -1);
-                    }
-                    if (size < 0x80) throw new IOException("NRO 파일이 너무 짧아요.");
+                    copy.copy(source, output, preparation);
                 }
-                try (RandomAccessFile input = new RandomAccessFile(copied, "r")) {
-                    preparation.update("NRO 헤더 확인", 0, 0);
-                    input.seek(0x10);
-                    byte[] magic = new byte[4];
-                    input.readFully(magic);
-                    if (magic[0] != 'N' || magic[1] != 'R' || magic[2] != 'O' || magic[3] != '0')
-                        throw new IOException("NRO 헤더를 확인할 수 없어요.");
-                }
+                preparation.update("NRO 헤더 확인", 0, 0);
+                SwitchNroValidator.validate(copied);
+                copy.checkCancelled();
             } catch (Exception failure) {
                 error = failure.getMessage() == null ? "NRO 파일을 준비하지 못했어요." : failure.getMessage();
             }
@@ -642,23 +713,32 @@ public final class MainActivity extends Activity {
             MAIN.post(() -> {
                 MAIN.removeCallbacks(loading);
                 MainActivity activity = target.get();
-                if (activity == null || activity.isDestroyed() || activity.isFinishing() || failure != null) {
+                if (activity != null) activity.switchCopy = null;
+                if (activity == null || activity.isDestroyed() || activity.isFinishing()
+                        || failure != null || copy.isCancelled()) {
                     if (ready != null) ready.delete();
-                    if (activity != null && failure != null && !activity.isDestroyed()) activity.showNotice(failure);
+                    if (activity != null) {
+                        activity.switchLaunching = false;
+                        if (!activity.isDestroyed() && !activity.isFinishing())
+                            activity.showNotice(copy.isCancelled() ? "Switch 파일 준비를 취소했어요." : failure);
+                    }
                     return;
                 }
                 if (!activity.launchable(entry)) {
                     ready.delete();
+                    activity.switchLaunching = false;
                     activity.showNotice("기기 조건이 바뀌어 Switch 홈브루를 실행할 수 없어요.");
                     return;
                 }
                 Intent player = new Intent(activity, Switch2PlayerActivity.class);
                 player.putExtra(Switch2PlayerActivity.EXTRA_GAME_PATH, ready.getAbsolutePath());
                 player.putExtra("delete_cached_nro", true);
+                activity.switchNro = ready;
                 try {
                     activity.startActivityForResult(player, PLAY_SWITCH);
                 } catch (RuntimeException launchError) {
-                    ready.delete();
+                    activity.deleteSwitchNro();
+                    activity.switchLaunching = false;
                     activity.showNotice("Switch 실행 화면을 열 수 없어요.");
                 }
             });
@@ -768,7 +848,10 @@ public final class MainActivity extends Activity {
     @android.annotation.TargetApi(33)
     private static final class BackApi33 {
         static OnBackInvokedCallback register(MainActivity activity) {
-            OnBackInvokedCallback callback = () -> { activity.preview = false; activity.render(); };
+            OnBackInvokedCallback callback = () -> {
+                if (activity.switchCopy != null) activity.cancelSwitchPreparation();
+                else { activity.preview = false; activity.render(); }
+            };
             activity.getOnBackInvokedDispatcher().registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, callback);
             return callback;
         }

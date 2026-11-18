@@ -10,9 +10,13 @@ MAIN = ACTIVITY.with_name("MainActivity.java")
 class SwitchUiJniBoundaryTest(unittest.TestCase):
     def test_cached_nro_cleanup_compares_canonical_cache_path(self):
         source = ACTIVITY.read_text()
+        capture = source.split("@Override public void onCreate", 1)[1].split(
+            "@Override public void onConfigurationChanged", 1)[0]
         cleanup = source.split("private void deleteCachedNro()", 1)[1].split("private void returnWatchdogFailure", 1)[0]
-        self.assertIn('getBooleanExtra("delete_cached_nro", false)', cleanup)
-        self.assertIn("game.getParentFile().equals(getCacheDir().getCanonicalFile())", cleanup)
+        self.assertIn('getBooleanExtra("delete_cached_nro", false)', capture)
+        self.assertIn("game.getParentFile().equals(getCacheDir().getCanonicalFile())", capture)
+        self.assertIn("cachedNro.delete()", cleanup)
+        self.assertNotIn("getIntent()", cleanup)
 
     def test_ui_lifecycle_and_inputs_never_query_or_halt_native_session_inline(self):
         source = ACTIVITY.read_text()

@@ -18,11 +18,18 @@ javac --release 17 -cp "$android_jar" -d "$output" \
   "$repo_root/app/src/main/java/dev/pocketconsole/DeviceCapabilities.java" \
   "$repo_root/app/src/main/java/dev/pocketconsole/DeviceProbe.java" \
   "$repo_root/app/src/main/java/dev/pocketconsole/PreparationProgress.java" \
+  "$repo_root/app/src/main/java/dev/pocketconsole/SwitchNroPreparation.java" \
+  "$repo_root/app/src/main/java/dev/pocketconsole/SwitchNroValidator.java" \
+  "$repo_root/app/src/main/java/dev/pocketconsole/SwitchProbeService.java" \
   "$repo_root/app/src/main/java/dev/pocketconsole/Switch2PlayerActivity.java" \
   "$repo_root/app/src/main/java/dev/pocketconsole/SwitchSessionStop.java" \
   "$repo_root/tests/SwitchNativeLibraryTest.java" \
+  "$repo_root/tests/SwitchNroPreparationTest.java" \
+  "$repo_root/tests/SwitchNroValidatorTest.java" \
   "$repo_root/tests/SwitchSessionStopTest.java" \
   "$repo_root/tests/SwitchKeyboardRequestTest.java"
 java -cp "$output:$android_jar" SwitchNativeLibraryTest
+java -cp "$output:$android_jar" dev.pocketconsole.SwitchNroPreparationTest
+java -cp "$output:$android_jar" dev.pocketconsole.SwitchNroValidatorTest "${SWITCH_ORIGINAL_NRO:-}"
 java -cp "$output:$android_jar" dev.pocketconsole.SwitchSessionStopTest
 java -cp "$output:$android_jar" org.yuzu.yuzu_emu.applets.keyboard.SwitchKeyboardRequestTest

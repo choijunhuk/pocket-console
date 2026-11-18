@@ -6,12 +6,16 @@
         android:icon="@drawable/ic_console"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
+        <service
+            android:name=".SwitchProbeService"
+            android:process=":switch2"
+            android:exported="false" />
         <activity
             android:name=".Switch2PlayerActivity"
             android:process=":switch2"
             android:exported="false"
             android:screenOrientation="sensorLandscape"
-            android:configChanges="orientation|screenSize" />
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|layoutDirection|locale" />
         <activity
             android:name=".ThreeDsPlayerActivity"
             android:process=":three_ds"

@@ -11,6 +11,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
 import android.view.KeyEvent;
@@ -33,8 +34,14 @@ import java.io.File;
 import java.io.IOException;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.yuzu.yuzu_emu.NativeLibrary;
 import org.yuzu.yuzu_emu.applets.keyboard.SoftwareKeyboard;
@@ -47,16 +54,22 @@ public final class Switch2PlayerActivity extends Activity
     public static final String EXTRA_FAILURE = "switch_launch_failure";
     // The original smoke allows 60s; successful local first frames arrive within a few seconds.
     private static final long FIRST_FRAME_TIMEOUT_MS = 45_000;
+    private static final long FIRST_FRAME_TOTAL_CAP_MS = 120_000;
     private static final long STOP_TIMEOUT_MS = 8_000;
+    private static final long SURFACE_RELEASE_WAIT_MS = 500;
     private static final ExecutorService SESSION = Executors.newSingleThreadExecutor();
     private static final ExecutorService CONTROL = Executors.newSingleThreadExecutor();
+    private static final AtomicInteger ACTIVE_PLAYERS = new AtomicInteger();
     private static boolean systemInitialized;
 
     private ConsoleUi ui;
+    private LinearLayout root;
+    private final List<Button> buttons = new ArrayList<>();
     private TextView status;
     private TextView gpuWarning;
     private SurfaceView display;
     private File game;
+    private File cachedNro;
     private File userRoot;
     private volatile boolean backendReady;
     private volatile boolean inputReady;
@@ -68,6 +81,10 @@ public final class Switch2PlayerActivity extends Activity
     private volatile String failure;
     private volatile String gpuNote = "";
     private volatile boolean firstFrameTimedOut;
+    private long firstFrameStartedAt;
+    private final AtomicBoolean stopWatchdogArmed = new AtomicBoolean();
+    private final AtomicBoolean activityCounted = new AtomicBoolean(true);
+    private CountDownLatch surfaceReleased = new CountDownLatch(0);
     private final Handler main = new Handler(Looper.getMainLooper());
     private final PreparationProgress preparation = new PreparationProgress();
     private final Runnable loadingStatus = new Runnable() {
@@ -81,7 +98,9 @@ public final class Switch2PlayerActivity extends Activity
             CONTROL, NativeLibrary::requestPocketStop, NativeLibrary::haltPocketSession);
     private final Runnable stopWatchdog = () -> {
         if (sessionDone) return;
-        android.util.Log.e("PocketSwitchPlayer", "FIRST_FRAME_WATCHDOG_FORCE_STOP");
+        if (failure == null) failure = "게임 종료가 지연되어 Switch 프로세스를 종료했어요.";
+        android.util.Log.e("PocketSwitchPlayer", firstFrameTimedOut
+                ? "FIRST_FRAME_WATCHDOG_FORCE_STOP" : "SWITCH_STOP_TIMEOUT_FORCE_STOP");
         returnWatchdogFailure();
         // A wedged Vulkan driver cannot unwind; only terminate the isolated Switch process.
         if (Build.VERSION.SDK_INT >= 28 && Application.getProcessName().endsWith(":switch2")) {
@@ -98,12 +117,11 @@ public final class Switch2PlayerActivity extends Activity
         failure = "첫 화면이 나오지 않아 실행을 중단했습니다";
         if (!gpuNote.isEmpty()) failure += "\n" + gpuNote;
         ending = true;
-        stop.request();
+        requestStopWithWatchdog();
         releaseInputs();
         SoftwareKeyboard.cancelOutstanding(this);
         message(failure);
         android.util.Log.w("PocketSwitchPlayer", "FIRST_FRAME_WATCHDOG_FIRED");
-        main.postDelayed(stopWatchdog, STOP_TIMEOUT_MS);
     };
     private boolean started;
     private volatile int nextProgram = -1;
@@ -117,6 +135,7 @@ public final class Switch2PlayerActivity extends Activity
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        ACTIVE_PLAYERS.incrementAndGet();
         setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
         ui = new ConsoleUi(this);
         buildScreen();
@@ -127,6 +146,13 @@ public final class Switch2PlayerActivity extends Activity
                     OnBackInvokedDispatcher.PRIORITY_DEFAULT, backCallback);
         }
         game = NativeLibrary.privatePath(this, getIntent().getStringExtra(EXTRA_GAME_PATH));
+        if (game != null && getIntent().getBooleanExtra("delete_cached_nro", false)) {
+            try {
+                if (game.getParentFile().equals(getCacheDir().getCanonicalFile())) cachedNro = game;
+            } catch (IOException error) {
+                android.util.Log.w("PocketSwitchPlayer", "Temporary NRO path check failed", error);
+            }
+        }
         if (game == null || !game.isFile() || game.length() == 0) {
             message("가져온 Switch 홈브루 파일을 찾을 수 없어요.");
             return;
@@ -149,6 +175,17 @@ public final class Switch2PlayerActivity extends Activity
     @Override public void onConfigurationChanged(Configuration configuration) {
         super.onConfigurationChanged(configuration);
         releaseInputs();
+        ui = new ConsoleUi(this);
+        root.setBackgroundColor(ui.paper);
+        status.setTextColor(ui.ink);
+        gpuWarning.setTextColor(ui.ink);
+        for (Button button : buttons) {
+            button.setTextColor(ui.ink);
+            button.setBackground(ui.buttonSurface(ui.shell, 14));
+        }
+        if (leftStick != null) leftStick.invalidate();
+        if (rightStick != null) rightStick.invalidate();
+        ui.applySystemBars(getWindow());
     }
 
     @Override protected void onPause() {
@@ -165,14 +202,17 @@ public final class Switch2PlayerActivity extends Activity
 
     @Override protected void onDestroy() {
         main.removeCallbacks(loadingStatus);
-        status.removeCallbacks(firstFrameWatchdog);
+        main.removeCallbacks(firstFrameWatchdog);
         ending = true;
         userExit = true;
         SoftwareKeyboard.cancelOutstanding(this);
-        stop.request();
+        requestStopWithWatchdog();
         releaseInputs();
         NativeLibrary.detach(this);
-        if (!started) deleteCachedNro();
+        if (!started) {
+            deleteCachedNro();
+            clearProcessSessionActive();
+        }
         if (Build.VERSION.SDK_INT >= 33 && backCallback != null) {
             getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(backCallback);
         }
@@ -191,15 +231,15 @@ public final class Switch2PlayerActivity extends Activity
         if (ending) {
             userExit = true;
             SoftwareKeyboard.cancelOutstanding(this);
-            stop.request();
+            requestStopWithWatchdog();
             if (sessionDone || !started) finish();
             return;
         }
         ending = true;
         userExit = true;
         main.removeCallbacks(loadingStatus);
-        status.removeCallbacks(firstFrameWatchdog);
-        stop.request();
+        main.removeCallbacks(firstFrameWatchdog);
+        requestStopWithWatchdog();
         releaseInputs();
         SoftwareKeyboard.cancelOutstanding(this);
         message("종료 중 · 게임 내 저장 마무리");
@@ -210,6 +250,8 @@ public final class Switch2PlayerActivity extends Activity
         surfaceReady = true;
         if (game == null || ending || started) return;
         started = true;
+        surfaceReleased = new CountDownLatch(1);
+        armFirstFrameWatchdog();
         SESSION.execute(() -> runSession(holder.getSurface()));
     }
 
@@ -227,7 +269,48 @@ public final class Switch2PlayerActivity extends Activity
             failure = "화면 연결이 끊겨 게임을 종료했어요. 다시 실행해 주세요.";
             message(failure);
         }
-        if (started) stop.request();
+        if (started) {
+            main.removeCallbacks(firstFrameWatchdog);
+            requestStopWithWatchdog();
+            try {
+                if (!surfaceReleased.await(SURFACE_RELEASE_WAIT_MS, TimeUnit.MILLISECONDS))
+                    android.util.Log.w("PocketSwitchPlayer", "SURFACE_RELEASE_WAIT_TIMEOUT");
+            } catch (InterruptedException error) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    private void requestStopWithWatchdog() {
+        armStopWatchdog();
+        stop.request();
+    }
+
+    private void armStopWatchdog() {
+        if (started && !sessionDone && stopWatchdogArmed.compareAndSet(false, true)) {
+            main.postDelayed(stopWatchdog, STOP_TIMEOUT_MS);
+            android.util.Log.i("PocketSwitchPlayer", "SWITCH_STOP_WATCHDOG_ARMED");
+        }
+    }
+
+    static boolean isProcessSessionActive() { return ACTIVE_PLAYERS.get() > 0; }
+
+    private void clearProcessSessionActive() {
+        if (activityCounted.compareAndSet(true, false)) ACTIVE_PLAYERS.decrementAndGet();
+    }
+
+    private void armFirstFrameWatchdog() {
+        firstFrameStartedAt = SystemClock.uptimeMillis();
+        main.removeCallbacks(firstFrameWatchdog);
+        main.postDelayed(firstFrameWatchdog, FIRST_FRAME_TIMEOUT_MS);
+    }
+
+    private void extendFirstFrameWatchdog() {
+        long elapsed = SystemClock.uptimeMillis() - firstFrameStartedAt;
+        long remaining = Math.min(FIRST_FRAME_TIMEOUT_MS,
+                Math.max(0, FIRST_FRAME_TOTAL_CAP_MS - elapsed));
+        main.removeCallbacks(firstFrameWatchdog);
+        main.postDelayed(firstFrameWatchdog, remaining);
     }
 
     private void runSession(Surface surface) {
@@ -242,9 +325,9 @@ public final class Switch2PlayerActivity extends Activity
             gpuNote = NativeLibrary.switchVulkanWarning();
             preparation.update("코어 초기화", 0, 0);
             runOnUiThread(() -> {
+                if (ending || sessionDone || isDestroyed()) return;
                 gpuWarning.setText(gpuNote);
                 gpuWarning.setVisibility(gpuNote.isEmpty() ? View.GONE : View.VISIBLE);
-                status.postDelayed(firstFrameWatchdog, FIRST_FRAME_TIMEOUT_MS);
             });
             NativeLibrary.initialize(this, "pocket_switch2");
             NativeLibrary.setAppDirectory(userRoot.getAbsolutePath());
@@ -271,33 +354,57 @@ public final class Switch2PlayerActivity extends Activity
                 frontend = false;
                 if (program >= 0 && !ending && surfaceReady) {
                     runOnUiThread(() -> {
+                        if (ending || sessionDone || isDestroyed()) return;
                         message("프로그램을 바꾸고 있어요.");
-                        status.removeCallbacks(firstFrameWatchdog);
-                        status.postDelayed(firstFrameWatchdog, FIRST_FRAME_TIMEOUT_MS);
+                        armFirstFrameWatchdog();
                     });
                 }
             } while (program >= 0 && !ending && surfaceReady);
         } catch (Exception | LinkageError error) {
             ending = true;
-            stop.request();
-            failure = "Switch 2 코어를 시작하지 못했어요. 기기와 파일을 확인하세요.";
-            runOnUiThread(() -> message(failure));
+            requestStopWithWatchdog();
+            if (!firstFrameTimedOut) {
+                failure = "Switch 2 코어를 시작하지 못했어요. 기기와 파일을 확인하세요.";
+                runOnUiThread(() -> { if (!isDestroyed()) message(failure); });
+            }
         } finally {
             ending = true;
+            armStopWatchdog();
             SoftwareKeyboard.cancelOutstanding(this);
-            if (inputReady) NativeInput.resetPocketState();
-            if (nativeSurface) NativeLibrary.surfaceDestroyed();
-            inputReady = false;
-            backendReady = false;
-            stop.finish();
-            sessionDone = true;
-            deleteCachedNro();
+            boolean cleaned = false;
+            boolean released = !nativeSurface;
+            try {
+                try {
+                    if (inputReady) NativeInput.resetPocketState();
+                } finally {
+                    if (nativeSurface) {
+                        NativeLibrary.surfaceDestroyed();
+                        released = true;
+                    }
+                }
+                cleaned = true;
+            } catch (RuntimeException | LinkageError error) {
+                android.util.Log.e("PocketSwitchPlayer", "Native cleanup failed", error);
+                if (failure == null) failure = "Switch 코어 정리에 실패해 프로세스를 종료합니다.";
+            } finally {
+                if (released) surfaceReleased.countDown();
+                inputReady = false;
+                backendReady = false;
+                if (cleaned) {
+                    stop.finish();
+                    deleteCachedNro();
+                    sessionDone = true;
+                    clearProcessSessionActive();
+                    main.removeCallbacks(stopWatchdog);
+                }
+            }
+            if (!cleaned) return;
             runOnUiThread(() -> {
+                if (isDestroyed()) return;
                 main.removeCallbacks(loadingStatus);
-                status.removeCallbacks(firstFrameWatchdog);
+                main.removeCallbacks(firstFrameWatchdog);
                 releaseInputs();
                 if (firstFrameTimedOut) {
-                    main.removeCallbacks(stopWatchdog);
                     android.util.Log.i("PocketSwitchPlayer", "FIRST_FRAME_WATCHDOG_STOPPED");
                     returnWatchdogFailure();
                 } else if (userExit) finish();
@@ -309,13 +416,8 @@ public final class Switch2PlayerActivity extends Activity
     }
 
     private void deleteCachedNro() {
-        if (game == null || !getIntent().getBooleanExtra("delete_cached_nro", false)) return;
-        try {
-            // privatePath is canonical; Android aliases /data/user/0 and /data/data.
-            if (game.getParentFile().equals(getCacheDir().getCanonicalFile())) game.delete();
-        } catch (IOException error) {
-            android.util.Log.w("PocketSwitchPlayer", "Temporary NRO cleanup failed", error);
-        }
+        if (cachedNro != null && cachedNro.exists() && !cachedNro.delete())
+            android.util.Log.w("PocketSwitchPlayer", "Temporary NRO cleanup failed");
     }
 
     private void returnWatchdogFailure() {
@@ -337,7 +439,7 @@ public final class Switch2PlayerActivity extends Activity
             if (ending) return;
             presented = true;
             main.removeCallbacks(loadingStatus);
-            status.removeCallbacks(firstFrameWatchdog);
+            main.removeCallbacks(firstFrameWatchdog);
             if (!ending) message("Switch 2 실험적 실행 · 화면 연결됨");
         });
     }
@@ -348,9 +450,10 @@ public final class Switch2PlayerActivity extends Activity
             nextProgram = -1;
             ending = true;
             SoftwareKeyboard.cancelOutstanding(this);
-            stop.request();
+            requestStopWithWatchdog();
         }
         runOnUiThread(() -> {
+            if (isDestroyed()) return;
             if (userExit) finish();
             else if (failure != null) message(failure);
             else if (nextProgram >= 0) message("프로그램을 바꾸고 있어요.");
@@ -361,17 +464,21 @@ public final class Switch2PlayerActivity extends Activity
 
     @Override public void onShaderProgress(int stage, int progress, int maximum) {
         runOnUiThread(() -> {
-            if (!presented && !ending) preparation.update("그래픽 자료 준비", progress, maximum);
+            if (!presented && !ending) {
+                preparation.update("그래픽 자료 준비", progress, maximum);
+                extendFirstFrameWatchdog();
+            }
         });
     }
 
     @Override public void onUnsupportedApplet(String reason) {
         runOnUiThread(() -> {
+            if (isDestroyed() || sessionDone || firstFrameTimedOut) return;
             failure = reason;
             message(reason);
             ending = true;
             SoftwareKeyboard.cancelOutstanding(this);
-            stop.request();
+            requestStopWithWatchdog();
         });
     }
 
@@ -384,7 +491,7 @@ public final class Switch2PlayerActivity extends Activity
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
 
     private void buildScreen() {
-        LinearLayout root = new LinearLayout(this);
+        root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(ui.paper);
         root.setOnApplyWindowInsetsListener((view, insets) -> {
@@ -497,6 +604,7 @@ public final class Switch2PlayerActivity extends Activity
 
     private Button button(String label, int id, ConsoleUi.InputScrollGuard inputGuard) {
         Button button = new Button(this);
+        buttons.add(button);
         button.setAllCaps(false);
         button.setText(label);
         button.setTextSize(13);

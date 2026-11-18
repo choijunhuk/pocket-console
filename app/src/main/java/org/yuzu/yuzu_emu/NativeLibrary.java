@@ -25,6 +25,7 @@ public final class NativeLibrary {
     }
 
     private static volatile WeakReference<Listener> listener = new WeakReference<>(null);
+    private static final Object listenerLock = new Object();
     private static volatile boolean initialized;
     private static String loadedBackend;
 
@@ -52,9 +53,14 @@ public final class NativeLibrary {
                 + ". 그래픽이 잘못 표시되거나 게임이 시작되지 않을 수 있어요.";
     }
 
-    public static String switchVulkanDiagnostic() {
+    public static synchronized String switchVulkanDiagnostic() {
+        if (loadedBackend != null && !"pocket_switch2".equals(loadedBackend))
+            return "다른 Switch 엔진이 이미 실행 중이에요.";
         try {
-            System.loadLibrary("pocket_switch2");
+            if (loadedBackend == null) {
+                System.loadLibrary("pocket_switch2");
+                loadedBackend = "pocket_switch2";
+            }
             String diagnostic = pocketVulkanDiagnostic();
             return diagnostic == null ? "Vulkan 기능 확인에 실패했어요." : diagnostic;
         } catch (LinkageError error) {
@@ -76,7 +82,7 @@ public final class NativeLibrary {
         if (loadedBackend != null && !loadedBackend.equals(backend)) {
             throw new IllegalStateException("Another Switch backend is loaded in this process");
         }
-        listener = new WeakReference<>(owner);
+        synchronized (listenerLock) { listener = new WeakReference<>(owner); }
         if (initialized) return;
         if (loadedBackend == null) {
             System.loadLibrary(backend);
@@ -88,8 +94,10 @@ public final class NativeLibrary {
         initialized = true;
     }
 
-    public static synchronized void detach(Listener owner) {
-        if (listener.get() == owner) listener = new WeakReference<>(null);
+    public static void detach(Listener owner) {
+        synchronized (listenerLock) {
+            if (listener.get() == owner) listener = new WeakReference<>(null);
+        }
     }
 
     private static Listener current() {

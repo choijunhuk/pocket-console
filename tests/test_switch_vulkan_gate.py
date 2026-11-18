@@ -29,17 +29,17 @@ class SwitchVulkanGateTests(unittest.TestCase):
         source = PLAYER.read_text()
         watchdog = source.split("private final Runnable firstFrameWatchdog = () -> {", 1)[1].split("};", 1)[0]
         self.assertIn("if (presented || ending || sessionDone) return;", watchdog)
-        self.assertIn("stop.request();", watchdog)
+        self.assertIn("requestStopWithWatchdog();", watchdog)
         self.assertIn("gpuNote", watchdog)
         callback = source.split("void onFirstFramePresented()", 1)[1].split("void onStopped(", 1)[0]
-        self.assertIn("status.removeCallbacks(firstFrameWatchdog);", callback)
+        self.assertIn("main.removeCallbacks(firstFrameWatchdog);", callback)
         cleanup = source.split("stop.finish();", 1)[1].split("private void deleteCachedNro()", 1)[0]
         self.assertLess(cleanup.index("sessionDone = true;"), cleanup.index("if (firstFrameTimedOut)"))
         self.assertIn("returnWatchdogFailure();", cleanup)
         self.assertIn("main.removeCallbacks(stopWatchdog)", cleanup)
         self.assertIn("setResult(RESULT_CANCELED", source)
         self.assertIn('Application.getProcessName().endsWith(":switch2")', source)
-        self.assertIn("main.postDelayed(stopWatchdog, STOP_TIMEOUT_MS)", watchdog)
+        self.assertIn("main.postDelayed(stopWatchdog, STOP_TIMEOUT_MS)", source)
         forced = source.split("main.postDelayed(() -> {", 1)[1].split("}, 300)", 1)[0]
         self.assertLess(forced.index("if (sessionDone) return;"), forced.index("killProcess"))
         self.assertLess(forced.index("deleteCachedNro();"), forced.index("killProcess"))
