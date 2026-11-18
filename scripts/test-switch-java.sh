@@ -17,6 +17,7 @@ javac --release 17 -cp "$android_jar" -d "$output" \
   "$repo_root/app/src/main/java/dev/pocketconsole/ConsoleType.java" \
   "$repo_root/app/src/main/java/dev/pocketconsole/DeviceCapabilities.java" \
   "$repo_root/app/src/main/java/dev/pocketconsole/DeviceProbe.java" \
+  "$repo_root/app/src/main/java/dev/pocketconsole/PreparationProgress.java" \
   "$repo_root/app/src/main/java/dev/pocketconsole/Switch2PlayerActivity.java" \
   "$repo_root/app/src/main/java/dev/pocketconsole/SwitchSessionStop.java" \
   "$repo_root/tests/SwitchNativeLibraryTest.java" \

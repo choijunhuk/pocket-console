@@ -2,17 +2,21 @@ name: Android
 
 on:
   push:
-    branches-ignore: [feat/switch-backends]
+    branches: ['**']
   pull_request:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
   three-ds-core:
     uses: ./.github/workflows/3ds-core.yml
+  three-ds-homebrew:
+    uses: ./.github/workflows/3ds-homebrew.yml
   three-ds-host:
+    needs: three-ds-homebrew
     uses: ./.github/workflows/3ds-host-smoke.yml
   native-smoke:
     runs-on: ubuntu-latest
@@ -33,7 +37,7 @@ jobs:
           path: .cache/native-smoke/*.ppm
           if-no-files-found: warn
   verify:
-    needs: [three-ds-core, three-ds-host]
+    needs: [three-ds-core, three-ds-homebrew]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -49,13 +53,27 @@ jobs:
           packages: platform-tools
           log-accepted-android-sdk-licenses: false
       - name: Install Android SDK
-        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.1.12297006'
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.1.12297006' 'ndk;28.2.13676358'
       - uses: gradle/actions/setup-gradle@v4
       - name: Check file classification
         run: |
           ./scripts/test-model.sh
           ./scripts/test-3ds-model.sh
+          ./scripts/test-switch-java.sh
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Verify pinned Switch SDK producer
+        id: switch-sdk
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/prepare-switch-jni.py --check-run
+      - uses: actions/download-artifact@v4
+        with:
+          name: pocket-switch2-sdk-source-arm64
+          run-id: ${{ steps.switch-sdk.outputs.run_id }}
+          github-token: ${{ github.token }}
+          path: .cache/switch-probes/pocket-switch2-arm64-v8a
+      - name: Verify and stage pinned Switch SDK
+        run: python3 scripts/prepare-switch-jni.py --require-sdk
       - uses: actions/download-artifact@v4
         with:
           name: azahar-core-arm64-v8a
@@ -71,14 +89,26 @@ jobs:
       - name: Generate original homebrew test asset
         run: python3 tests/native/make_smoke_nds.py app/src/androidTest/assets/smoke.nds
       - name: Build and lint
-        run: ./gradlew --no-daemon lintDebug assembleDebug assembleDebugAndroidTest
+        run: |
+          ./gradlew --no-daemon lintDebug assembleDebug assembleDebugAndroidTest
+          mkdir -p app/build/outputs/smoke-tests
+          cp app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk app/build/outputs/smoke-tests/ds-test.apk
+          ./gradlew --no-daemon assembleDebugAndroidTest -PsmokeRunner=dev.pocketconsole.ThreeDsSmokeInstrumentation
+          cp app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk app/build/outputs/smoke-tests/three-ds-test.apk
       - name: Verify debug APK
         run: |
           apk=app/build/outputs/apk/debug/app-debug.apk
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$apk"
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk"
           unzip -l "$apk" | grep -E 'lib/(arm64-v8a|x86_64)/lib(pocket_ds|pocket_3ds|azahar_libretro|retro|c\+\+_shared)\.so'
+          python3 scripts/verify-release-apk.py "$apk"
+          if "$ANDROID_HOME/build-tools/36.0.0/aapt" dump permissions "$apk" | grep -q 'uses-permission'; then
+            echo 'Android APK requests a permission' >&2
+            exit 1
+          fi
           sha256sum "$apk" | tee app/build/outputs/apk/debug/app-debug.apk.sha256
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump xmltree app/build/outputs/smoke-tests/ds-test.apk AndroidManifest.xml | grep -F '"dev.pocketconsole.DsSmokeInstrumentation"'
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump xmltree app/build/outputs/smoke-tests/three-ds-test.apk AndroidManifest.xml | grep -F '"dev.pocketconsole.ThreeDsSmokeInstrumentation"'
       - name: Explain lint failures
         if: failure()
         run: |
@@ -93,6 +123,7 @@ jobs:
             app/build/outputs/apk/debug/*.apk
             app/build/outputs/apk/debug/*.sha256
             app/build/outputs/apk/androidTest/debug/*.apk
+            app/build/outputs/smoke-tests/*.apk
             app/build/reports/tests/
             app/build/reports/lint-results-debug.html
           if-no-files-found: warn
@@ -112,35 +143,24 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - uses: reactivecircus/android-emulator-runner@v2
+        env:
+          POCKET_CI_EMULATOR: '1'
         with:
           api-level: 35
           arch: x86_64
           profile: pixel_2
+          avd-name: pocket-console-ci
           disable-animations: true
-          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect
-          script: |
-            adb shell wm size 720x1280
-            adb shell wm density 320
-            adb install artifacts/outputs/apk/debug/app-debug.apk
-            adb install artifacts/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-            adb shell dumpsys SurfaceFlinger | grep -i GLES
-            ./scripts/capture-android-ui.sh
-            adb shell am instrument -w -r dev.pocketconsole.test/dev.pocketconsole.DsSmokeInstrumentation | tee android-native-smoke.log
-            adb exec-out run-as dev.pocketconsole cat cache/smoke-player.png > android-player.png
-            base64 -w0 android-player.png | sed 's/^/DS_SCREENSHOT_BASE64:/'
-            grep 'DS_ANDROID_SMOKE_PASS' android-native-smoke.log
-            adb shell am instrument -w -r dev.pocketconsole.test/dev.pocketconsole.ThreeDsSmokeInstrumentation | tee three-ds-android-smoke.log
-            adb exec-out run-as dev.pocketconsole cat cache/three-ds-player-portrait.png > three-ds-player-portrait.png
-            adb exec-out run-as dev.pocketconsole cat cache/three-ds-player-landscape.png > three-ds-player-landscape.png
-            base64 -w0 three-ds-player-portrait.png | sed 's/^/THREEDS_PORTRAIT_BASE64:/'
-            base64 -w0 three-ds-player-landscape.png | sed 's/^/THREEDS_LANDSCAPE_BASE64:/'
-            grep 'THREEDS_ANDROID_SMOKE_PASS' three-ds-android-smoke.log
+          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader
+          script: ./scripts/test-android-smoke.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: android-native-smoke
           path: |
             android-native-smoke.log
+            android-failure-logcat.txt
+            android-failure-activities.txt
             android-player.png
             three-ds-android-smoke.log
             three-ds-player-portrait.png

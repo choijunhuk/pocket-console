@@ -1,0 +1,19 @@
+{
+  "workflow": "switch-sdk.yml",
+  "run_id": 44283215435,
+  "head_sha": "312404fe917798d60ba986b964e519074ad31c65",
+  "artifact_name": "pocket-switch2-sdk-source-arm64",
+  "artifact_id": 14420092101,
+  "artifact_sha256": "e4c68b913854e14ad84f6388f39c79c422973bb20a7c6f550e78c78212ce0b6e",
+  "expires_at": "2027-02-16T10:12:43Z",
+  "sha256s_sha256": "13e03e18e44610ca736ffd7343b5dd9473f4c238e15e8a914f82aa5c3b7f7184",
+  "files": {
+    "source-lock.json": "698aa75a4e0d64b042fb9a3101dd94d82ee87a9d72601040a324034ae64aca7f",
+    "runtime-deps.json": "16a58419bc2f57ed8226c4594072ef64ec7e459cc78af011d01b3d32225baf45",
+    "sdl-java-bootstrap.tar.gz": "d9920c37310f2b569b62984a12b4f54eee244fe9a6fabeb02beea81d7d7b7b12",
+    "runtime/arm64-v8a/libpocket_switch2.so": "217aacae3bded0330798cb5f6d40661eaacb1082f81651035b7a2b3ff468f7d5",
+    "runtime/arm64-v8a/libhook_impl.so": "2a3d378dcd9416d2872215bb1467921b5f8909704c6173bb52007f29d768c0e8",
+    "runtime/arm64-v8a/libmain_hook.so": "c09622d8980d8f94079b7d3cb6d88781b20e2d18b33b31391a10db10daec1acb",
+    "runtime/arm64-v8a/libc++_shared.so": "ab4e6c71b96b851de45a8a9bd86369e7dbc2130a44b3b4520564be94847910f2"
+  }
+}

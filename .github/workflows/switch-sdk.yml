@@ -18,7 +18,8 @@ on:
       - scripts/test-switch-java.sh
       - scripts/prepare-switch-source.py
       - scripts/prepare-switch-host-tool.py
-      - third_party/switch*.lock.json
+      - third_party/switch-hokkaido.lock.json
+      - third_party/switch-glslang.lock.json
       - tests/test_switch_sdk_hook.py
       - tests/test_switch_sdk_objects.py
       - tests/test_switch_sdk_runtime.py
@@ -65,7 +66,7 @@ jobs:
         id: sdk-cache
         with:
           path: .cache/switch-probes/pocket-switch2-arm64-v8a
-          key: pocket-switch2-sdk-ndk28.2-cmake3.31.5-${{ hashFiles('third_party/switch*.lock.json', 'scripts/prepare-switch-source.py', 'scripts/prepare-switch-host-tool.py', 'scripts/build-switch-probe.sh', 'scripts/build-switch-sdk.sh', 'scripts/stage-switch-sdk-runtime.py', 'switch/native/**', 'tests/test_switch_sdk_hook.py', '.github/workflows/switch-sdk.yml') }}
+          key: pocket-switch2-sdk-ndk28.2-cmake3.31.5-${{ hashFiles('third_party/switch-hokkaido.lock.json', 'third_party/switch-glslang.lock.json', 'scripts/prepare-switch-source.py', 'scripts/prepare-switch-host-tool.py', 'scripts/build-switch-probe.sh', 'scripts/build-switch-sdk.sh', 'scripts/stage-switch-sdk-runtime.py', 'switch/native/**', 'tests/test_switch_sdk_hook.py', '.github/workflows/switch-sdk.yml') }}
       - uses: actions/cache/restore@v4
         id: native-build-cache
         if: steps.sdk-cache.outputs.cache-hit != 'true'
@@ -73,9 +74,9 @@ jobs:
           path: |
             .cache/hokkaido-source
             .cache/hokkaido-build/arm64-v8a
-          key: pocket-switch2-build-linux-ndk28.2-cmake3.31.5-${{ hashFiles('third_party/switch*.lock.json', 'scripts/prepare-switch-source.py', 'scripts/prepare-switch-host-tool.py') }}-${{ hashFiles('switch/native/**', 'scripts/build-switch-probe.sh', 'scripts/build-switch-sdk-objects.py') }}
+          key: pocket-switch2-build-linux-ndk28.2-cmake3.31.5-${{ hashFiles('third_party/switch-hokkaido.lock.json', 'third_party/switch-glslang.lock.json', 'scripts/prepare-switch-source.py', 'scripts/prepare-switch-host-tool.py') }}-${{ hashFiles('switch/native/**', 'scripts/build-switch-probe.sh', 'scripts/build-switch-sdk-objects.py') }}
           restore-keys: |
-            pocket-switch2-build-linux-ndk28.2-cmake3.31.5-${{ hashFiles('third_party/switch*.lock.json', 'scripts/prepare-switch-source.py', 'scripts/prepare-switch-host-tool.py') }}-
+            pocket-switch2-build-linux-ndk28.2-cmake3.31.5-${{ hashFiles('third_party/switch-hokkaido.lock.json', 'third_party/switch-glslang.lock.json', 'scripts/prepare-switch-source.py', 'scripts/prepare-switch-host-tool.py') }}-
       - name: Link Pocket Console native SDK
         if: steps.sdk-cache.outputs.cache-hit != 'true'
         run: POCKET_SDK_BUILD_PHASE=link ./scripts/build-switch-sdk.sh
@@ -138,4 +139,5 @@ jobs:
         with:
           name: pocket-switch2-sdk-source-arm64
           path: .cache/switch-probes/pocket-switch2-arm64-v8a/
+          retention-days: 90
           if-no-files-found: error

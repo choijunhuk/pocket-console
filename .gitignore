@@ -1,5 +1,7 @@
 .gradle/
 .cache/
+.secrets/
+.omc/
 .worktrees/
 __pycache__/
 *.pyc
@@ -29,3 +31,6 @@ local.properties
 *.sav
 *.apk
 *.so
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/

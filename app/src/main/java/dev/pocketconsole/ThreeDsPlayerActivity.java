@@ -1,6 +1,7 @@
 package dev.pocketconsole;
 
 import android.app.Activity;
+import android.content.res.AssetFileDescriptor;
 import android.content.res.Configuration;
 import android.graphics.Insets;
 import android.media.AudioAttributes;
@@ -20,6 +21,7 @@ import android.view.WindowInsets;
 import android.window.OnBackInvokedCallback;
 import android.window.OnBackInvokedDispatcher;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -53,30 +55,55 @@ public final class ThreeDsPlayerActivity extends Activity {
     private Future<?> playerFuture;
     private volatile ThreeDsScreenView screens;
     private ConsoleUi.InputScrollGuard inputGuard;
-    private String statusText = "파일을 확인하고 있어요…";
+    private final PreparationProgress preparation = new PreparationProgress();
+    private boolean preparing = true;
+    private String statusText = preparation.message();
     private TextView status;
     private OnBackInvokedCallback backCallback;
+    private PlayerDisplayUi display;
+    private final Runnable loadingStatus = new Runnable() {
+        @Override public void run() {
+            if (!preparing || stopped || isDestroyed()) return;
+            showStatus(preparation.message());
+            main.postDelayed(this, 500);
+        }
+    };
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         ui = new ConsoleUi(this);
         PAPER = ui.paper; INK = ui.ink; SHELL = ui.shell;
-        ui.applyBars(this);
+        display = new PlayerDisplayUi(this, "3ds", this::buildUi, this::clearInput, this::requestExit);
         buildUi();
-        String uri = getIntent().getStringExtra(EXTRA_ROM_URI);
-        if (uri == null) { showStatus("3DS 파일 주소가 없어요."); playerDone = true; return; }
         if (Build.VERSION.SDK_INT >= 33) {
-            backCallback = this::requestExit;
+            backCallback = this::handleBack;
             getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
                     OnBackInvokedDispatcher.PRIORITY_DEFAULT, backCallback);
         }
+        String uri = getIntent().getStringExtra(EXTRA_ROM_URI);
+        if (uri == null) { finishPreparation("3DS 파일 주소가 없어요."); playerDone = true; return; }
+        main.post(loadingStatus);
         playerFuture = PLAYER.submit(() -> play(Uri.parse(uri)));
     }
 
     @android.annotation.SuppressLint("GestureBackNavigation")
-    @Override public void onBackPressed() {
-        if (Build.VERSION.SDK_INT >= 33) { super.onBackPressed(); return; }
-        requestExit();
+    @Override public void onBackPressed() { handleBack(); }
+
+    private void handleBack() {
+        if (display.isFullscreen()) display.toggleFullscreen();
+        else requestExit();
+    }
+
+    @Override public void onWindowFocusChanged(boolean focused) {
+        super.onWindowFocusChanged(focused);
+        if (focused && display != null) display.applyBars(ui);
+    }
+
+    private void clearInput() {
+        buttons.set(0);
+        touchDown = false;
+        circleX = circleY = 0;
+        if (inputGuard != null) inputGuard.reset();
     }
 
     @Override protected void onResume() {
@@ -87,29 +114,21 @@ public final class ThreeDsPlayerActivity extends Activity {
 
     @Override protected void onPause() {
         paused = true;
-        buttons.set(0);
-        touchDown = false;
-        circleX = circleY = 0;
-        if (inputGuard != null) inputGuard.reset();
+        clearInput();
         synchronized (lifecycle) { lifecycle.notifyAll(); }
         super.onPause();
     }
 
     @Override public void onConfigurationChanged(Configuration configuration) {
         super.onConfigurationChanged(configuration);
-        buttons.set(0);
-        touchDown = false;
-        circleX = circleY = 0;
-        if (inputGuard != null) inputGuard.reset();
+        clearInput();
         buildUi();
     }
 
     @Override protected void onDestroy() {
         stopped = true;
-        buttons.set(0);
-        touchDown = false;
-        circleX = circleY = 0;
-        if (inputGuard != null) inputGuard.reset();
+        main.removeCallbacks(loadingStatus);
+        clearInput();
         synchronized (lifecycle) { lifecycle.notifyAll(); }
         if (playerFuture != null) playerFuture.cancel(true);
         if (Build.VERSION.SDK_INT >= 33 && backCallback != null) {
@@ -123,11 +142,8 @@ public final class ThreeDsPlayerActivity extends Activity {
         if (playerDone) { finish(); return; }
         exitRequested = true;
         stopped = true;
-        buttons.set(0);
-        touchDown = false;
-        circleX = circleY = 0;
-        if (inputGuard != null) inputGuard.reset();
-        showStatus("종료 중… 저장을 반영하고 있어요.");
+        clearInput();
+        finishPreparation(preparing ? "불러오기 취소 중…" : "종료 중… 저장을 반영하고 있어요.");
         synchronized (lifecycle) { lifecycle.notifyAll(); }
         if (playerStarted && playerFuture != null) playerFuture.cancel(true);
     }
@@ -187,20 +203,25 @@ public final class ThreeDsPlayerActivity extends Activity {
         page.setMotionEventSplittingEnabled(true);
         page.setPadding(dp(16), dp(8), dp(16), dp(8));
         scroll.addView(page);
-        setContentView(scroll);
-        scroll.requestApplyInsets();
+        if (!display.isFullscreen()) {
+            setContentView(scroll);
+            display.applyBars(ui);
+            scroll.requestApplyInsets();
+        }
 
         LinearLayout header = row();
         Button exit = button("‹  라이브러리");
         exit.setContentDescription("3DS 게임을 종료하고 라이브러리로 돌아가기");
         exit.setOnClickListener(v -> requestExit());
         header.addView(exit, new LinearLayout.LayoutParams(0, dp(48), 1));
-        TextView title = new TextView(this);
-        title.setText("3DS  /  PLAY");
-        title.setTextSize(14);
-        title.setTextColor(ui.accent);
-        title.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
-        header.addView(title, new LinearLayout.LayoutParams(0, dp(48), 1));
+        Button layoutButton = button("화면 배치");
+        layoutButton.setContentDescription("3DS 화면 배치 선택");
+        layoutButton.setOnClickListener(v -> display.showMenu(v, this::setLayoutMode));
+        header.addView(layoutButton, new LinearLayout.LayoutParams(0, dp(48), 1));
+        Button fullscreenButton = button("전체화면");
+        fullscreenButton.setContentDescription("3DS 전체화면으로 보기");
+        fullscreenButton.setOnClickListener(v -> display.toggleFullscreen());
+        header.addView(fullscreenButton, new LinearLayout.LayoutParams(0, dp(48), 1));
         page.addView(header);
         status = new TextView(this);
         status.setText(statusText);
@@ -208,11 +229,12 @@ public final class ThreeDsPlayerActivity extends Activity {
         status.setTextColor(INK);
         status.setPadding(0, dp(4), 0, dp(4));
         status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
-        page.addView(status);
+        if (!display.isFullscreen()) page.addView(status);
 
         screens = new ThreeDsScreenView(this, inputGuard, (x, y, down) -> {
             touchX = x; touchY = y; touchDown = down;
         });
+        screens.setLayoutMode(display.mode(), display.swapped(), display.isFullscreen());
         ThreeDsCirclePadView circle = new ThreeDsCirclePadView(this, inputGuard, (x, y) -> {
             circleX = x; circleY = y;
         });
@@ -224,23 +246,26 @@ public final class ThreeDsPlayerActivity extends Activity {
         controls.setOrientation(LinearLayout.VERTICAL);
         controls.setGravity(Gravity.CENTER_HORIZONTAL);
         controls.setMotionEventSplittingEnabled(true);
-        boolean landscape = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE
+        boolean landscape = !display.isFullscreen()
+                && getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE
                 && getResources().getConfiguration().screenWidthDp >= 600;
+        LinearLayout leftControls = null;
+        LinearLayout hands = row();
         if (landscape) {
-            LinearLayout hands = row();
             hands.addView(circle, new LinearLayout.LayoutParams(dp(96), dp(96)));
             hands.addView(dpad);
             hands.addView(abxy);
             controls.addView(hands);
         } else {
-            LinearLayout hands = row();
-            LinearLayout left = new LinearLayout(this);
-            left.setOrientation(LinearLayout.VERTICAL);
-            left.setGravity(Gravity.CENTER_HORIZONTAL);
-            left.setMotionEventSplittingEnabled(true);
-            left.addView(circle, new LinearLayout.LayoutParams(dp(96), dp(96)));
-            left.addView(dpad);
-            hands.addView(left, new LinearLayout.LayoutParams(0, -2, 1));
+            leftControls = new LinearLayout(this);
+            boolean compact = display.isFullscreen()
+                    && getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
+            leftControls.setOrientation(compact ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
+            leftControls.setGravity(Gravity.CENTER);
+            leftControls.setMotionEventSplittingEnabled(true);
+            leftControls.addView(circle, new LinearLayout.LayoutParams(dp(96), dp(96)));
+            leftControls.addView(dpad, new LinearLayout.LayoutParams(dp(144), -2));
+            hands.addView(leftControls, new LinearLayout.LayoutParams(0, -2, 1));
             hands.addView(abxy, new LinearLayout.LayoutParams(0, -2, 1));
             controls.addView(hands);
         }
@@ -251,6 +276,19 @@ public final class ThreeDsPlayerActivity extends Activity {
             utility.addView(control(name, bit), new LinearLayout.LayoutParams(0, dp(48), 1));
         }
         controls.addView(utility);
+        if (display.isFullscreen()) {
+            hands.removeView(leftControls);
+            hands.removeView(abxy);
+            controls.removeView(utility);
+            Button menu = button("메뉴");
+            menu.setContentDescription("3DS 전체화면 메뉴");
+            menu.setOnClickListener(v -> display.showMenu(v, this::setLayoutMode));
+            FrameLayout full = display.fullscreenView(screens, leftControls, abxy, utility, status, menu);
+            setContentView(full);
+            display.applyBars(ui);
+            full.requestApplyInsets();
+            return;
+        }
         if (landscape) {
             LinearLayout content = row();
             content.addView(screens, new LinearLayout.LayoutParams(0, -2, 1));
@@ -271,6 +309,10 @@ public final class ThreeDsPlayerActivity extends Activity {
             LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) screen.getLayoutParams();
             if (params.height != height) { params.height = height; screen.setLayoutParams(params); }
         });
+    }
+
+    private void setLayoutMode(DualScreenLayout.Mode mode, boolean swapped) {
+        if (screens != null) screens.setLayoutMode(mode, swapped, display.isFullscreen());
     }
 
     private LinearLayout pad(String[][] labels, int[][] bits) {
@@ -330,6 +372,13 @@ public final class ThreeDsPlayerActivity extends Activity {
     private void showStatus(String message) {
         statusText = message;
         status.setText(message);
+        display.updateStatus(status);
+    }
+
+    private void finishPreparation(String message) {
+        preparing = false;
+        main.removeCallbacks(loadingStatus);
+        showStatus(message);
     }
 
     private void play(Uri uri) {
@@ -340,17 +389,20 @@ public final class ThreeDsPlayerActivity extends Activity {
         try {
             if (stopped) return;
             File rom;
-            InputStream opened;
-            try { opened = getContentResolver().openInputStream(uri); }
+            AssetFileDescriptor opened;
+            try { opened = getContentResolver().openAssetFileDescriptor(uri, "r"); }
             catch (FileNotFoundException | SecurityException error) {
                 throw new IOException("파일에 접근할 수 없어요. 파일을 다시 선택해 주세요.", error);
             }
-            try (InputStream source = opened) {
-                if (source == null) throw new IOException("파일에 접근할 수 없어요. 파일을 다시 선택해 주세요.");
-                rom = ThreeDsRomCache.copy(source, new File(getCacheDir(), "three-ds-roms"));
+            try (AssetFileDescriptor document = opened) {
+                if (document == null) throw new IOException("파일에 접근할 수 없어요. 파일을 다시 선택해 주세요.");
+                try (InputStream source = document.createInputStream()) {
+                    rom = ThreeDsRomCache.copy(source, new File(getCacheDir(), "three-ds-roms"),
+                            document.getLength(), preparation);
+                }
             }
             if (stopped) return;
-            main.post(() -> { if (!stopped && !isDestroyed()) showStatus("게임을 여는 중…"); });
+            preparation.update("코어 초기화", 0, -1);
             File userRoot = new File(getFilesDir(), "three-ds-user");
             File systemRoot = new File(getFilesDir(), "three-ds-system");
             if ((!userRoot.isDirectory() && !userRoot.mkdirs())
@@ -360,6 +412,8 @@ public final class ThreeDsPlayerActivity extends Activity {
             token = ThreeDsNative.open(rom.getAbsolutePath(), userRoot.getAbsolutePath(),
                     systemRoot.getAbsolutePath());
             if (token == 0) throw new IOException("3DS 코어가 게임을 열지 못했어요.");
+            if (stopped) return;
+            preparation.update("오디오 준비", 0, -1);
             int[] metrics = new int[4];
             ThreeDsNative.configuration(token, metrics);
             if (metrics[0] != 400 || metrics[1] != 480 || metrics[2] < 8000
@@ -379,6 +433,7 @@ public final class ThreeDsPlayerActivity extends Activity {
                     bufferBytes, AudioTrack.MODE_STREAM, AudioManager.AUDIO_SESSION_ID_GENERATE);
             if (output.getState() != AudioTrack.STATE_INITIALIZED) throw new IOException("3DS 오디오 장치를 열 수 없어요.");
             AudioTrack audio = output;
+            preparation.update("첫 화면 대기", 0, -1);
             int[] pixels = new int[400 * 480];
             short[] samples = new short[16384];
             long frameNanos = 1_000_000_000_000L / metrics[3];
@@ -401,7 +456,7 @@ public final class ThreeDsPlayerActivity extends Activity {
                     screens.setFrame(pixels);
                     if (!firstVideo) {
                         firstVideo = true;
-                        main.post(() -> { if (!stopped && !isDestroyed()) showStatus("3DS 실행 중"); });
+                        main.post(() -> { if (!stopped && !isDestroyed()) finishPreparation("3DS 실행 중"); });
                     }
                     int remaining = frames * 2, offset = 0;
                     while (remaining > 0 && !paused && !stopped) {
@@ -420,7 +475,7 @@ public final class ThreeDsPlayerActivity extends Activity {
         } catch (InterruptedException ignored) {
             Thread.currentThread().interrupt();
         } catch (IOException | RuntimeException | LinkageError error) {
-            main.post(() -> { if (!isDestroyed() && !exitRequested) showStatus("3DS 실행 실패: " + error.getMessage()); });
+            main.post(() -> { if (!isDestroyed() && !exitRequested) finishPreparation("3DS 실행 실패: " + error.getMessage()); });
         } finally {
             try {
                 if (output != null) {
@@ -441,7 +496,7 @@ public final class ThreeDsPlayerActivity extends Activity {
                 if (isDestroyed()) return;
                 if (failure != null) {
                     exitRequested = false;
-                    showStatus("3DS 종료 중 저장 반영에 실패했어요: " + failure.getMessage());
+                    finishPreparation("3DS 종료 중 저장 반영에 실패했어요: " + failure.getMessage());
                 } else if (exitRequested) {
                     finish();
                 }

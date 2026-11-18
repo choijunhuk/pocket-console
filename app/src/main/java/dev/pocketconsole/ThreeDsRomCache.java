@@ -19,11 +19,17 @@ final class ThreeDsRomCache {
     private ThreeDsRomCache() { }
 
     static synchronized File copy(InputStream source, File directory) throws IOException {
+        return copy(source, directory, -1, null);
+    }
+
+    static synchronized File copy(InputStream source, File directory, long expectedSize,
+                                  PreparationProgress progress) throws IOException {
         Files.createDirectories(directory.toPath());
         Path temporary = Files.createTempFile(directory.toPath(), "3ds-", ".tmp");
         try {
             MessageDigest digest = sha256();
             long length = 0;
+            if (progress != null) progress.update("파일 복사", 0, expectedSize);
             try (OutputStream output = Files.newOutputStream(temporary)) {
                 byte[] buffer = new byte[64 * 1024];
                 int count;
@@ -41,14 +47,16 @@ final class ThreeDsRomCache {
                     length += count;
                     digest.update(buffer, 0, count);
                     output.write(buffer, 0, count);
+                    if (progress != null) progress.update("파일 복사", length, expectedSize);
                 }
             }
             checkInterrupted();
+            if (progress != null) progress.update("파일 검사", 0, 0);
             String extension = validate(temporary.toFile(), length);
             String name = hex(digest.digest()) + extension;
             Path target = directory.toPath().resolve(name);
             if (Files.isRegularFile(target) && Files.size(target) == length
-                    && validExisting(target, length, extension, name.substring(0, 64))) {
+                    && validExisting(target, length, extension, name.substring(0, 64), progress)) {
                 checkInterrupted();
                 return target.toFile();
             }
@@ -64,18 +72,27 @@ final class ThreeDsRomCache {
 
     private static boolean validExisting(Path file, long length, String extension, String digest)
             throws IOException {
+        return validExisting(file, length, extension, digest, null);
+    }
+
+    private static boolean validExisting(Path file, long length, String extension, String digest,
+                                         PreparationProgress progress) throws IOException {
         try {
             checkInterrupted();
             if (!validate(file.toFile(), length).equals(extension)) return false;
+            if (progress != null) progress.update("기존 캐시 확인", 0, length);
             MessageDigest hash = sha256();
             try (InputStream input = Files.newInputStream(file)) {
                 byte[] buffer = new byte[64 * 1024];
                 int count;
+                long checked = 0;
                 while (true) {
                     checkInterrupted();
                     count = input.read(buffer);
                     if (count == -1) break;
                     hash.update(buffer, 0, count);
+                    checked += count;
+                    if (progress != null) progress.update("기존 캐시 확인", checked, length);
                 }
             }
             checkInterrupted();

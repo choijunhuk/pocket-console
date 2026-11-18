@@ -1,0 +1,19 @@
+name: 3DS diagnostic
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/3ds-emulation]
+    paths:
+      - .github/workflows/3ds-diagnostic.yml
+      - app/src/main/cpp/three_ds/**
+
+permissions:
+  contents: read
+
+jobs:
+  homebrew:
+    uses: ./.github/workflows/3ds-homebrew.yml
+  host:
+    needs: homebrew
+    uses: ./.github/workflows/3ds-host-smoke.yml

@@ -1,6 +1,5 @@
 package dev.pocketconsole;
 
-import android.app.Activity;
 import android.content.Context;
 import android.content.res.Configuration;
 import android.content.res.ColorStateList;
@@ -8,7 +7,10 @@ import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.graphics.drawable.StateListDrawable;
+import android.os.Build;
 import android.view.View;
+import android.view.Window;
+import android.view.WindowInsetsController;
 import android.widget.ScrollView;
 
 import java.util.HashSet;
@@ -53,15 +55,32 @@ final class ConsoleUi {
                 : color == ink ? (dark ? 0xffd2d9d0 : 0xff455651)
                 : (dark ? 0xff52625e : 0xffb9c1b7);
         states.addState(new int[]{android.R.attr.state_pressed}, shape(pressed, radiusDp));
+        GradientDrawable focused = shape(color, radiusDp);
+        focused.setStroke(Math.max(2, Math.round(2 * density)),
+                color == accent ? onAccent : color == ink ? paper : ink);
+        states.addState(new int[]{android.R.attr.state_focused}, focused);
         states.addState(new int[]{}, shape(color, radiusDp));
         return new RippleDrawable(ColorStateList.valueOf(dark ? 0x66ffffff : 0x33202826), states, null);
     }
 
-    void applyBars(Activity activity) {
-        activity.getWindow().setStatusBarColor(paper);
-        activity.getWindow().setNavigationBarColor(paper);
-        activity.getWindow().getDecorView().setSystemUiVisibility(dark ? 0
-                : View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+    void applySystemBars(Window window) {
+        window.setStatusBarColor(paper);
+        window.setNavigationBarColor(paper);
+        if (Build.VERSION.SDK_INT >= 30) {
+            int mask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                    | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+            WindowInsetsController controller = window.getInsetsController();
+            if (controller != null) controller.setSystemBarsAppearance(dark ? 0 : mask, mask);
+            else window.getDecorView().post(() -> {
+                WindowInsetsController attached = window.getInsetsController();
+                if (attached != null) attached.setSystemBarsAppearance(dark ? 0 : mask, mask);
+            });
+        } else {
+            View decor = window.getDecorView();
+            int mask = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+            int flags = decor.getSystemUiVisibility();
+            decor.setSystemUiVisibility((flags & ~mask) | (dark ? 0 : mask));
+        }
     }
 
     static final class InputScrollGuard {

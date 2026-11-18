@@ -73,6 +73,7 @@ public final class MainActivity extends Activity {
     private String notice;
     private LinearLayout page;
     private TextView pressedStatus;
+    private TextView noticeView;
     private final Set<String> pressedButtons = new LinkedHashSet<>();
     private SharedPreferences uiPreferences;
     private SharedPreferences libraryPreferences;
@@ -103,7 +104,6 @@ public final class MainActivity extends Activity {
             ConsoleType restored = consoleForId(uiPreferences.getString(KEY_CONSOLE, null));
             if (restored != null) selected = restored;
         }
-        ui.applyBars(this);
         render();
         Context app = getApplicationContext();
         DOCUMENT_IO.execute(() -> {
@@ -227,8 +227,11 @@ public final class MainActivity extends Activity {
         }
         DeviceCapabilities.Compatibility check = compatibility(type);
         if (check.state == DeviceCapabilities.Compatibility.State.UNSUPPORTED) return "기기 조건 미충족";
-        if (check.state == DeviceCapabilities.Compatibility.State.UNKNOWN) return "기기 조건 확인 중";
-        return type == ConsoleType.THREE_DS && !threeDsPackaged ? "엔진 준비 중" : "실행 가능";
+        if (check.state == DeviceCapabilities.Compatibility.State.UNKNOWN) return "기기 조건 확인 불가";
+        if (type == ConsoleType.THREE_DS && !threeDsPresenceChecked) return "엔진 확인 중";
+        if (type == ConsoleType.THREE_DS) return threeDsPackaged
+                ? "실험적 실행 · 호환성 미확인" : "현재 실행 불가 · 엔진 없음";
+        return "실행 가능";
     }
 
     @Override protected void onSaveInstanceState(Bundle out) {
@@ -291,6 +294,7 @@ public final class MainActivity extends Activity {
     }
 
     private void render() {
+        noticeView = null;
         if (Build.VERSION.SDK_INT >= 33) {
             if (preview && !backRegistered) {
                 previewBack = BackApi33.register(this);
@@ -333,6 +337,7 @@ public final class MainActivity extends Activity {
         scroll.addView(page);
         root.addView(scroll, new LinearLayout.LayoutParams(-1, -1));
         setContentView(root);
+        ui.applySystemBars(getWindow());
         root.requestApplyInsets();
         if (preview) drawPreview(); else drawLibrary();
     }
@@ -377,11 +382,11 @@ public final class MainActivity extends Activity {
                 ? "3DS 엔진 패키지를 확인하고 있어요."
                 : selected == ConsoleType.THREE_DS && !threeDsPackaged
                 && check.state == DeviceCapabilities.Compatibility.State.READY
-                ? "3DS 엔진이 이 빌드에 없어요. 설치 후 실제 실행을 확인합니다."
+                ? "3DS 엔진이 이 빌드에 없어요. 기다려도 실행되지 않으며, 엔진이 포함된 빌드가 필요해요."
                 : selected == ConsoleType.SWITCH ? check.state == DeviceCapabilities.Compatibility.State.READY
                         ? switchDiagnostic.isEmpty() ? switchWarning : switchDiagnostic : check.reason
                 : (selected == ConsoleType.DS || selected == ConsoleType.THREE_DS)
-                ? check.reason : "게임 실행 엔진은 아직 연결되지 않았어요.";
+                ? check.reason : "게임 실행 엔진이 아직 연결되지 않았어요. 기다려도 실행되지 않으며, 현재는 파일 등록과 조작 미리보기만 가능해요.";
         page.addView(text(detail, 13, QUIET, false));
         gap(page, 12);
         Button importButton = button("파일 가져오기", ORANGE, ui.onAccent);
@@ -399,6 +404,7 @@ public final class MainActivity extends Activity {
         gap(page, 12);
         if (notice != null) {
             TextView message = text(notice, 13, ORANGE, false);
+            noticeView = message;
             message.setPadding(dp(12), dp(12), dp(12), dp(12));
             message.setBackground(shape(ui.notice, 12));
             page.addView(message);
@@ -434,11 +440,17 @@ public final class MainActivity extends Activity {
 
     private void drawEntry(LibraryStore.Entry entry) {
         boolean canPlay = launchable(entry);
-        Button item = button(entry.name + "  ·  " + (canPlay ? "실행" : "준비 중"), ui.raised, INK);
+        boolean experimental = entry.console == ConsoleType.THREE_DS || entry.console == ConsoleType.SWITCH;
+        String action = canPlay ? (experimental ? "실험적 실행" : "실행") : "실행 불가";
+        String accessibleAction = canPlay ? (experimental
+                ? "실험적 실행, 게임 호환성 미확인" : "게임 실행")
+                : "실행 불가, " + (entry.console == ConsoleType.SWITCH
+                        && !ConsoleType.isSwitchHomebrew(entry.name)
+                        ? "NSP/XCI는 목록 등록만 지원합니다." : readiness(entry.console));
+        Button item = button(entry.name + "  ·  " + action, ui.raised, INK);
         item.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
         item.setPadding(dp(16), 0, dp(16), 0);
-        item.setContentDescription(entry.name + ", " + entry.console.label + " 파일, "
-                + (canPlay ? "게임 실행" : readiness(entry.console)));
+        item.setContentDescription(entry.name + ", " + entry.console.label + " 파일, " + accessibleAction);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(60));
         params.bottomMargin = dp(8);
         page.addView(item, params);
@@ -555,13 +567,13 @@ public final class MainActivity extends Activity {
                             : "게임 실행 엔진을 아직 사용할 수 없어요.";
                     new AlertDialog.Builder(activity).setTitle(activity.readiness(entry.console))
                             .setMessage(entry.name + "\n\n" + reason
-                                    + " 조작 미리보기에서 버튼 배치만 확인할 수 있어요.")
+                                    + " 기다려도 자동으로 실행되지 않아요. 조작 미리보기에서 버튼 배치만 확인할 수 있어요.")
                             .setPositiveButton("조작 미리보기", (dialog, which) -> { activity.selected = entry.console; activity.preview = true; activity.render(); })
                             .setNegativeButton("닫기", null).show();
                 } else {
                     new AlertDialog.Builder(activity).setTitle("파일 접근 불가")
                             .setMessage("원본 파일이 이동했거나 읽기 권한이 해제되었어요. 목록은 유지됩니다.")
-                            .setPositiveButton("파일 다시 선택", (dialog, which) -> activity.importFile())
+                            .setPositiveButton("새 파일 가져오기", (dialog, which) -> activity.importFile())
                             .setNeutralButton("목록에서 지우기", (dialog, which) -> activity.confirmRemoval(entry))
                             .setNegativeButton("유지", null).show();
                 }
@@ -572,7 +584,21 @@ public final class MainActivity extends Activity {
     private void launchSwitchHomebrew(LibraryStore.Entry entry) {
         Context app = getApplicationContext();
         WeakReference<MainActivity> target = new WeakReference<>(this);
-        showNotice("Switch 홈브루 파일을 준비하고 있어요…");
+        PreparationProgress preparation = new PreparationProgress();
+        showNotice(preparation.message(false));
+        WeakReference<TextView> progressTarget = new WeakReference<>(noticeView);
+        Runnable loading = new Runnable() {
+            @Override public void run() {
+                MainActivity activity = target.get();
+                if (activity == null || activity.isDestroyed() || activity.isFinishing()) return;
+                TextView message = progressTarget.get();
+                if (message == null || activity.noticeView != message) return;
+                activity.notice = preparation.message(false);
+                message.setText(activity.notice);
+                MAIN.postDelayed(this, 500);
+            }
+        };
+        MAIN.post(loading);
         DOCUMENT_IO.execute(() -> {
             File copied = null;
             String error = null;
@@ -580,6 +606,7 @@ public final class MainActivity extends Activity {
                 if (source == null) throw new IOException("파일을 열 수 없어요.");
                 Path path = Files.createTempFile(app.getCacheDir().toPath(), "switch-nro-", ".nro");
                 copied = path.toFile();
+                preparation.update("파일 복사", 0, -1);
                 try (OutputStream output = Files.newOutputStream(path)) {
                     byte[] buffer = new byte[64 * 1024];
                     long size = 0;
@@ -595,10 +622,12 @@ public final class MainActivity extends Activity {
                             throw new IOException("NRO 파일이 2 GiB를 넘습니다.");
                         output.write(buffer, 0, count);
                         size += count;
+                        preparation.update("파일 복사", size, -1);
                     }
                     if (size < 0x80) throw new IOException("NRO 파일이 너무 짧아요.");
                 }
                 try (RandomAccessFile input = new RandomAccessFile(copied, "r")) {
+                    preparation.update("NRO 헤더 확인", 0, 0);
                     input.seek(0x10);
                     byte[] magic = new byte[4];
                     input.readFully(magic);
@@ -611,6 +640,7 @@ public final class MainActivity extends Activity {
             File ready = copied;
             String failure = error;
             MAIN.post(() -> {
+                MAIN.removeCallbacks(loading);
                 MainActivity activity = target.get();
                 if (activity == null || activity.isDestroyed() || activity.isFinishing() || failure != null) {
                     if (ready != null) ready.delete();

@@ -69,6 +69,14 @@ public final class Switch2PlayerActivity extends Activity
     private volatile String gpuNote = "";
     private volatile boolean firstFrameTimedOut;
     private final Handler main = new Handler(Looper.getMainLooper());
+    private final PreparationProgress preparation = new PreparationProgress();
+    private final Runnable loadingStatus = new Runnable() {
+        @Override public void run() {
+            if (presented || ending || sessionDone || isDestroyed()) return;
+            message(preparation.message());
+            main.postDelayed(this, 500);
+        }
+    };
     private final SwitchSessionStop stop = new SwitchSessionStop(
             CONTROL, NativeLibrary::requestPocketStop, NativeLibrary::haltPocketSession);
     private final Runnable stopWatchdog = () -> {
@@ -112,7 +120,7 @@ public final class Switch2PlayerActivity extends Activity
         setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
         ui = new ConsoleUi(this);
         buildScreen();
-        ui.applyBars(this);
+        ui.applySystemBars(getWindow());
         if (Build.VERSION.SDK_INT >= 33) {
             backCallback = this::requestExit;
             getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
@@ -134,7 +142,8 @@ public final class Switch2PlayerActivity extends Activity
             return;
         }
         display.getHolder().addCallback(this);
-        message("기기 그래픽과 게임 파일을 확인하고 있어요.");
+        preparation.update("기기 그래픽 확인", 0, 0);
+        main.post(loadingStatus);
     }
 
     @Override public void onConfigurationChanged(Configuration configuration) {
@@ -155,6 +164,7 @@ public final class Switch2PlayerActivity extends Activity
     }
 
     @Override protected void onDestroy() {
+        main.removeCallbacks(loadingStatus);
         status.removeCallbacks(firstFrameWatchdog);
         ending = true;
         userExit = true;
@@ -187,6 +197,7 @@ public final class Switch2PlayerActivity extends Activity
         }
         ending = true;
         userExit = true;
+        main.removeCallbacks(loadingStatus);
         status.removeCallbacks(firstFrameWatchdog);
         stop.request();
         releaseInputs();
@@ -229,6 +240,7 @@ public final class Switch2PlayerActivity extends Activity
                 return;
             }
             gpuNote = NativeLibrary.switchVulkanWarning();
+            preparation.update("코어 초기화", 0, 0);
             runOnUiThread(() -> {
                 gpuWarning.setText(gpuNote);
                 gpuWarning.setVisibility(gpuNote.isEmpty() ? View.GONE : View.VISIBLE);
@@ -251,6 +263,7 @@ public final class Switch2PlayerActivity extends Activity
             int program = 0;
             boolean frontend = true;
             do {
+                preparation.update("첫 화면 대기", 0, 0);
                 presented = false;
                 nextProgram = -1;
                 NativeLibrary.run(game.getAbsolutePath(), program, frontend);
@@ -280,6 +293,7 @@ public final class Switch2PlayerActivity extends Activity
             sessionDone = true;
             deleteCachedNro();
             runOnUiThread(() -> {
+                main.removeCallbacks(loadingStatus);
                 status.removeCallbacks(firstFrameWatchdog);
                 releaseInputs();
                 if (firstFrameTimedOut) {
@@ -314,7 +328,7 @@ public final class Switch2PlayerActivity extends Activity
 
     @Override public void onLoaded() {
         runOnUiThread(() -> {
-            if (!presented && !ending) message("게임을 불러왔어요. 첫 화면을 기다리고 있어요.");
+            if (!presented && !ending) preparation.update("첫 화면 대기", 0, 0);
         });
     }
 
@@ -322,6 +336,7 @@ public final class Switch2PlayerActivity extends Activity
         runOnUiThread(() -> {
             if (ending) return;
             presented = true;
+            main.removeCallbacks(loadingStatus);
             status.removeCallbacks(firstFrameWatchdog);
             if (!ending) message("Switch 2 실험적 실행 · 화면 연결됨");
         });
@@ -346,7 +361,7 @@ public final class Switch2PlayerActivity extends Activity
 
     @Override public void onShaderProgress(int stage, int progress, int maximum) {
         runOnUiThread(() -> {
-            if (!presented && !ending) message("그래픽 자료를 준비하고 있어요.");
+            if (!presented && !ending) preparation.update("그래픽 자료 준비", progress, maximum);
         });
     }
 

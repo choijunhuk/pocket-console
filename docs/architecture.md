@@ -18,7 +18,15 @@ The initial UI uses Android SDK Views and Java 17, without a UI runtime dependen
 | 3DS | [Azahar](https://github.com/azahar-emu/azahar) | Android source and libretro builds exist. Check the chosen stable revision; 2126.2 includes a security fix, and 2127 RC changes GPLv2+ to GPLv3+. |
 | Switch 1 | [Eden first-party source](https://git.eden-emu.dev/eden-emu/eden), [mirror/build docs](https://github.com/eden-emulator/mirror/blob/master/docs/build/Android.md) | C++, Android build, GPLv3+. Native integration is substantial; this is not a drop-in SDK. |
 
-DS now embeds `libretro/melonDS@66b5d2634cd0a79030562811e6e05f5532f800ba`; the modern melonDS/Android-port entries remain background options. 3DS and Switch are still candidates, not bundled dependencies. No common multi-core abstraction has been invented ahead of actual integration.
+DS embeds `libretro/melonDS@66b5d2634cd0a79030562811e6e05f5532f800ba`; the modern melonDS/Android-port entries remain background options. The active 3DS branch also packages source-built Azahar 2126.2, while the integrated experimental Switch homebrew path uses the pinned Hokkaido backend. No common multi-core abstraction has been invented ahead of actual integration.
+
+## 3DS integration in development
+
+`ThreeDsRomCache` validates supported executable/container bounds and atomically copies a document into a digest-named private cache. `ThreeDsPlayerActivity` runs in the dedicated `:three_ds` process, owns serialized native lifecycle work, and uses a fixed `files/three-ds-user` directory across games. This process separates native singleton state; it is not a separate-UID security sandbox.
+
+`ThreeDsEngine` loads the pinned libretro core, owns an EGL context and framebuffer, reads actual hardware-rendered frames into the Android view, and forwards audio, buttons, touch and Circle Pad input. The top screen is 400×240 and the bottom touch screen is 320×240. Android's OpenGL path requires actual GLES 3.2; a filename, packaged library, or advertised device capability does not establish compatibility.
+
+Core source, patch and per-ABI artifacts are checked before Gradle packaging. Both ABIs build, but runtime color/input/audio acceptance and physical-device save/relaunch remain open; see [the current evidence](3ds-verification.md). The experimental Switch homebrew path uses a separate native Surface/Vulkan adapter in the same APK and an isolated `:switch2` process, with no external emulator. Its NRO-only library route, actual Vulkan initialization gate, advisory feature warnings and bounded first-frame watchdog are described in [Switch verification](switch-verification.md). The process shares the app UID; it is not a separate security sandbox. `PreparationProgress` and `ConsoleUi` are shared with DS/3DS; the dual-screen `PlayerDisplayUi` remains specific to DS/3DS.
 
 ## DS source and persistence boundaries
 
@@ -42,7 +50,6 @@ For Switch: first prove a native Android build and original homebrew boot on a r
 
 ## Decisions still open
 
-- Reference Android device and supported performance tier.
-- Exact engine revisions and patch/update procedure.
-- Core combination and source/license distribution strategy.
-- Store distribution and public project license before release.
+- Measured performance tiers beyond the Galaxy S23 Ultra reference handset.
+- Physical-device Switch homebrew acceptance, audio and measured compatibility beyond the original NRO.
+- Store distribution, release signing and corresponding-source delivery.

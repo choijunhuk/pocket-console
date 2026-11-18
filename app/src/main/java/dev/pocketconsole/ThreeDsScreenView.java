@@ -27,6 +27,9 @@ final class ThreeDsScreenView extends View {
     private final int inset;
     private final int hinge;
     private int activePointer = -1;
+    private DualScreenLayout.Mode layoutMode = DualScreenLayout.Mode.AUTO;
+    private boolean swapped;
+    private boolean borderless;
 
     ThreeDsScreenView(Context context, ConsoleUi.InputScrollGuard scrollGuard, TouchListener listener) {
         super(context);
@@ -43,36 +46,69 @@ final class ThreeDsScreenView extends View {
         postInvalidateOnAnimation();
     }
 
+    void setLayoutMode(DualScreenLayout.Mode mode, boolean swapped, boolean borderless) {
+        if (layoutMode == mode && this.swapped == swapped && this.borderless == borderless) return;
+        releaseTouch();
+        layoutMode = mode;
+        this.swapped = swapped;
+        this.borderless = borderless;
+        updateBounds();
+        requestLayout();
+        invalidate();
+    }
+
     @Override protected void onMeasure(int widthSpec, int heightSpec) {
-        int width = Math.min(MeasureSpec.getSize(widthSpec),
-                Math.round(400 * getResources().getDisplayMetrics().density));
-        int natural = Math.round((width - 2f * inset) * 480 / 400) + 2 * inset + hinge;
-        int height = MeasureSpec.getMode(heightSpec) == MeasureSpec.UNSPECIFIED ? natural
-                : MeasureSpec.getMode(heightSpec) == MeasureSpec.EXACTLY
-                ? MeasureSpec.getSize(heightSpec) : Math.min(natural, MeasureSpec.getSize(heightSpec));
+        int width = MeasureSpec.getMode(widthSpec) == MeasureSpec.UNSPECIFIED ? 400 + 2 * inset
+                : MeasureSpec.getSize(widthSpec);
+        int height = MeasureSpec.getMode(heightSpec) == MeasureSpec.UNSPECIFIED
+                ? 480 + hinge + 2 * inset : MeasureSpec.getSize(heightSpec);
         setMeasuredDimension(width, height);
+    }
+
+    @Override protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+        super.onSizeChanged(w, h, oldw, oldh);
+        releaseTouch();
+        updateBounds();
+    }
+
+    @Override protected void onDetachedFromWindow() {
+        releaseTouch();
+        super.onDetachedFromWindow();
+    }
+
+    private void updateBounds() {
+        DualScreenLayout layout = DualScreenLayout.calculate(getWidth(), getHeight(),
+                400, 240, 320, 240, inset, hinge, layoutMode, swapped, borderless);
+        if (layout.top == null) top.setEmpty();
+        else top.set(layout.top.left, layout.top.top, layout.top.right, layout.top.bottom);
+        if (layout.bottom == null) bottom.setEmpty();
+        else bottom.set(layout.bottom.left, layout.bottom.top, layout.bottom.right, layout.bottom.bottom);
+    }
+
+    private void releaseTouch() {
+        if (activePointer < 0) return;
+        activePointer = -1;
+        touch.changed(0, 0, false);
+        scrollGuard.release(this);
     }
 
     @Override protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
         int[] pixels = newest.getAndSet(null);
         if (pixels != null) bitmap.setPixels(pixels, 0, 400, 0, 0, 400, 480);
-        paint.setColor(Color.rgb(65, 79, 79));
-        canvas.drawRoundRect(0, 0, getWidth(), getHeight(), inset * 2, inset * 2, paint);
-        float scale = Math.max(0.01f, Math.min((getWidth() - 2f * inset) / 400,
-                (getHeight() - 2f * inset - hinge) / 480));
-        float screenHeight = 240 * scale;
-        float left = (getWidth() - 400 * scale) / 2;
-        float y = (getHeight() - 2 * screenHeight - hinge) / 2;
-        top.set(left, y, left + 400 * scale, y + screenHeight);
-        bottom.set((getWidth() - 320 * scale) / 2, y + screenHeight + hinge,
-                (getWidth() + 320 * scale) / 2, y + 2 * screenHeight + hinge);
+        if (borderless) canvas.drawColor(Color.BLACK);
+        else {
+            paint.setColor(Color.rgb(65, 79, 79));
+            canvas.drawRoundRect(0, 0, getWidth(), getHeight(), inset * 2, inset * 2, paint);
+        }
         paint.setColor(Color.rgb(28, 37, 38));
-        canvas.drawRoundRect(top.left - 3, top.top - 3, top.right + 3, top.bottom + 3, 4, 4, paint);
-        canvas.drawRoundRect(bottom.left - 3, bottom.top - 3, bottom.right + 3, bottom.bottom + 3, 4, 4, paint);
+        if (!borderless) {
+            if (!top.isEmpty()) canvas.drawRoundRect(top.left - 3, top.top - 3, top.right + 3, top.bottom + 3, 4, 4, paint);
+            if (!bottom.isEmpty()) canvas.drawRoundRect(bottom.left - 3, bottom.top - 3, bottom.right + 3, bottom.bottom + 3, 4, 4, paint);
+        }
         paint.setColor(Color.WHITE);
-        canvas.drawBitmap(bitmap, topSource, top, paint);
-        canvas.drawBitmap(bitmap, bottomSource, bottom, paint);
+        if (!top.isEmpty()) canvas.drawBitmap(bitmap, topSource, top, paint);
+        if (!bottom.isEmpty()) canvas.drawBitmap(bitmap, bottomSource, bottom, paint);
     }
 
     @Override public boolean onTouchEvent(MotionEvent event) {
@@ -91,16 +127,14 @@ final class ThreeDsScreenView extends View {
         } else if (action == MotionEvent.ACTION_CANCEL || action == MotionEvent.ACTION_UP
                 || (action == MotionEvent.ACTION_POINTER_UP
                 && event.getPointerId(event.getActionIndex()) == activePointer)) {
-            activePointer = -1;
-            touch.changed(0, 0, false);
-            scrollGuard.release(this);
+            releaseTouch();
         }
         return true;
     }
 
     private void update(float x, float y) {
         if (!bottom.contains(x, y)) { touch.changed(0, 0, false); return; }
-        touch.changed(Math.min(319, (int) ((x - bottom.left) * 320 / bottom.width())),
-                Math.min(239, (int) ((y - bottom.top) * 240 / bottom.height())), true);
+        touch.changed(Math.max(0, Math.min(319, (int) ((x - bottom.left) * 320 / bottom.width()))),
+                Math.max(0, Math.min(239, (int) ((y - bottom.top) * 240 / bottom.height()))), true);
     }
 }

@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Stage an optional pinned Switch SDK into the single production APK."""
+"""Verify a pinned CI Switch SDK before staging it into the production APK."""
 
+import argparse
 import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
+import re
 import shutil
 import struct
+import subprocess
 import tarfile
 import tempfile
 
@@ -14,6 +17,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SDK = ROOT / ".cache/switch-probes/pocket-switch2-arm64-v8a"
 OUTPUT = ROOT / ".cache/switch-jni"
 NAMES = {"libpocket_switch2.so", "libhook_impl.so", "libmain_hook.so", "libc++_shared.so"}
+PRODUCER_LOCK = ROOT / "third_party/switch-sdk.lock.json"
+PINNED_FILES = {"source-lock.json", "runtime-deps.json", "sdl-java-bootstrap.tar.gz"} | {
+    f"runtime/arm64-v8a/{name}" for name in NAMES}
 
 
 def digest(path):
@@ -24,12 +30,62 @@ def digest(path):
     return value.hexdigest()
 
 
+def producer_pin(lock_path):
+    if not lock_path.is_file():
+        raise ValueError(f"Switch SDK producer lock is missing: {lock_path}")
+    pin = json.loads(lock_path.read_text())
+    if pin.get("unavailable_reason"):
+        raise ValueError("Switch SDK producer unavailable: " + pin["unavailable_reason"])
+    return pin
+
+
+def verify_producer(lock_path=PRODUCER_LOCK):
+    pin = producer_pin(lock_path)
+    run_id = pin["run_id"]
+    if (pin.get("workflow") != "switch-sdk.yml" or pin.get("artifact_name") != "pocket-switch2-sdk-source-arm64"
+            or not isinstance(run_id, int) or run_id <= 0 or not os.environ.get("GH_TOKEN")):
+        raise ValueError("Switch SDK producer run ID or GH_TOKEN is missing")
+    repository = "choijunhuk/pocket-console"
+
+    def github(path):
+        return json.loads(subprocess.check_output(["gh", "api", f"repos/{repository}/{path}"], text=True))
+
+    run = github(f"actions/runs/{run_id}")
+    if (run.get("conclusion") != "success" or run.get("head_sha") != pin["head_sha"]
+            or run.get("path", "").split("@")[0] != ".github/workflows/switch-sdk.yml"):
+        raise ValueError("Switch SDK producer workflow, success state, or HEAD does not match its lock")
+    artifacts = github(f"actions/runs/{run_id}/artifacts?per_page=100").get("artifacts", [])
+    matches = [item for item in artifacts if item.get("name") == pin["artifact_name"]]
+    if len(matches) != 1 or matches[0].get("expired"):
+        raise ValueError("Pinned Switch SDK artifact is missing or expired; rebuild and repin switch-sdk.yml")
+    if matches[0].get("digest") != "sha256:" + pin["artifact_sha256"]:
+        raise ValueError("Pinned Switch SDK artifact SHA256 does not match GitHub metadata")
+    print(f"SWITCH_SDK_PRODUCER_PASS run_id={run_id} head_sha={pin['head_sha']}")
+    return run_id
+
+
 def prepare(sdk=SDK, output=OUTPUT, lock=ROOT / "third_party/switch-hokkaido.lock.json",
-            sdk_root=None):
+            sdk_root=None, producer_lock=PRODUCER_LOCK, require_sdk=False):
+    producer = producer_pin(producer_lock) if require_sdk else None
     if not sdk.is_dir():
         if output.exists():
             shutil.rmtree(output)
+        if require_sdk:
+            raise ValueError("Pinned Switch SDK is missing; download the locked switch-sdk.yml artifact")
         return "SWITCH_JNI_NOT_PACKAGED"
+    if require_sdk:
+        if not PINNED_FILES <= producer["files"].keys():
+            raise ValueError("Switch SDK producer lock omits required file SHA256s")
+        sums_file = sdk / "SHA256SUMS"
+        if not sums_file.is_file() or sums_file.is_symlink() or digest(sums_file) != producer["sha256s_sha256"]:
+            raise ValueError("Switch SDK checksum manifest differs from the pinned CI artifact")
+        for name, checksum in producer["files"].items():
+            path = PurePosixPath(name)
+            if path.is_absolute() or ".." in path.parts or not re.fullmatch(r"[0-9a-f]{64}", checksum):
+                raise ValueError("Switch SDK producer lock contains an unsafe path or checksum")
+            candidate = sdk / name
+            if not candidate.is_file() or candidate.is_symlink() or digest(candidate) != checksum:
+                raise ValueError("Switch SDK pinned file SHA256 mismatch: " + name)
     pin = json.loads(lock.read_text())
     if json.loads((sdk / "source-lock.json").read_text()) != pin:
         raise ValueError("Switch SDK source lock mismatch")
@@ -106,4 +162,18 @@ def prepare(sdk=SDK, output=OUTPUT, lock=ROOT / "third_party/switch-hokkaido.loc
 
 
 if __name__ == "__main__":
-    print(prepare())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--sdk", type=Path, default=SDK)
+    parser.add_argument("--output", type=Path, default=OUTPUT)
+    parser.add_argument("--producer-lock", type=Path, default=PRODUCER_LOCK)
+    parser.add_argument("--check-run", action="store_true")
+    parser.add_argument("--require-sdk", action="store_true")
+    args = parser.parse_args()
+    if args.check_run:
+        run_id = verify_producer(args.producer_lock)
+        if os.environ.get("GITHUB_OUTPUT"):
+            with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+                output.write(f"run_id={run_id}\n")
+    else:
+        print(prepare(args.sdk, args.output, producer_lock=args.producer_lock,
+                      require_sdk=args.require_sdk))

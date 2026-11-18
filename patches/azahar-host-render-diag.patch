@@ -1,0 +1,135 @@
+diff --git a/src/video_core/renderer_opengl/renderer_opengl.cpp b/src/video_core/renderer_opengl/renderer_opengl.cpp
+index 09aad77..7d85991 100644
+--- a/src/video_core/renderer_opengl/renderer_opengl.cpp
++++ b/src/video_core/renderer_opengl/renderer_opengl.cpp
+@@ -295,9 +295,10 @@ void RendererOpenGL::LoadFBToScreenInfo(const Pica::FramebufferConfig& framebuff
+     // only allows rows to have a memory alignement of 4.
+     ASSERT(pixel_stride % 4 == 0);
+ 
+-    if (color_fill.is_enabled ||
+-        !rasterizer.AccelerateDisplay(framebuffer, framebuffer_addr, static_cast<u32>(pixel_stride),
+-                                      screen_info)) {
++    const bool accelerated = !color_fill.is_enabled &&
++        rasterizer.AccelerateDisplay(framebuffer, framebuffer_addr, static_cast<u32>(pixel_stride),
++                                     screen_info);
++    if (!accelerated) {
+         u32 width = framebuffer.width;
+         u32 height = framebuffer.height;
+         u8 fill_pixel[3];
+@@ -336,6 +337,116 @@ void RendererOpenGL::LoadFBToScreenInfo(const Pica::FramebufferConfig& framebuff
+         state.texture_units[0].texture_2d = 0;
+         state.Apply();
+     }
++#ifdef POCKET_HOST_RENDER_DIAG
++    const int screen = &screen_info == &screen_infos[0] ? 0 :
++                       &screen_info == &screen_infos[2] ? 1 : -1;
++    if (screen >= 0) {
++        static unsigned visits[2]{};
++        static unsigned printed[2]{};
++        static bool saw_color[2]{};
++        static bool saw_accelerated[2]{};
++        static bool saw_address[2]{};
++        const unsigned visit = ++visits[screen];
++        auto byte_at = [&](u64 offset) -> int {
++            if (!framebuffer_addr || offset > 0xffffffffULL - framebuffer_addr) return -1;
++            const u8* byte = system.Memory().GetPhysicalPointer(
++                framebuffer_addr + static_cast<PAddr>(offset));
++            return byte ? *byte : -1;
++        };
++        const int first[3] = {byte_at(0), byte_at(1), byte_at(2)};
++        const bool colored = first[0] > 0 || first[1] > 0 || first[2] > 0;
++        const bool first_color = colored && !saw_color[screen];
++        const bool first_accelerated = accelerated && !saw_accelerated[screen];
++        const bool first_address = framebuffer_addr && !saw_address[screen];
++        saw_color[screen] |= colored;
++        saw_accelerated[screen] |= accelerated;
++        saw_address[screen] |= framebuffer_addr != 0;
++        if (printed[screen] < 8 &&
++            (visit == 1 || visit == 16 || visit == 256 || visit == 1024 ||
++             visit == 4096 || first_color || first_accelerated || first_address)) {
++            ++printed[screen];
++            const u64 center = u64(framebuffer.height.Value() / 2) * framebuffer.stride +
++                               u64(framebuffer.width.Value() / 2) * bpp;
++            LOG_INFO(Render_OpenGL,
++                     "POCKET_HOST_FB screen={} visit={} fill={} active={} addr={:#x} "
++                     "stride={} format={:#x} accelerated={} first={},{},{} center={},{},{}",
++                     screen, visit, bool(color_fill.is_enabled), u32(framebuffer.active_fb),
++                     framebuffer_addr, u32(framebuffer.stride), u32(framebuffer.format),
++                     accelerated, first[0], first[1], first[2], byte_at(center),
++                     byte_at(center + 1), byte_at(center + 2));
++            if (colored && (first_color || visit == 1024 || visit == 4096)) {
++                const auto& layout = render_window.GetFramebufferLayout();
++                const auto& rect = screen == 0 ? layout.top_screen : layout.bottom_screen;
++                GLint old_texture = 0, old_read_fbo = 0, old_read_buffer = 0;
++                GLint old_pbo = 0, old_pack = 0, old_row = 0, old_skip_rows = 0, old_skip_pixels = 0;
++                glGetIntegerv(GL_TEXTURE_BINDING_2D, &old_texture);
++                glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &old_read_fbo);
++                glGetIntegerv(GL_READ_BUFFER, &old_read_buffer);
++                glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &old_pbo);
++                glGetIntegerv(GL_PACK_ALIGNMENT, &old_pack);
++                glGetIntegerv(GL_PACK_ROW_LENGTH, &old_row);
++                glGetIntegerv(GL_PACK_SKIP_ROWS, &old_skip_rows);
++                glGetIntegerv(GL_PACK_SKIP_PIXELS, &old_skip_pixels);
++                const GLenum prior_error = glGetError();
++                while (glGetError() != GL_NO_ERROR) {}
++
++                GLint texture_width = 0, texture_height = 0;
++                glBindTexture(GL_TEXTURE_2D, screen_info.display_texture);
++                glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &texture_width);
++                glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &texture_height);
++                const GLenum texture_error = glGetError();
++                glBindTexture(GL_TEXTURE_2D, old_texture);
++                GLuint probe_fbo = 0;
++                GLenum status = 0, read_error = 0;
++                GLint probe_x = -1, probe_y = -1;
++                u8 rgba[4]{};
++                if (!texture_error && texture_width > 0 && texture_height > 0) {
++                    const auto& uv = screen_info.display_texcoords;
++                    probe_x = std::clamp(GLint((uv.top + uv.bottom) * 0.5f * texture_width),
++                                         0, texture_width - 1);
++                    probe_y = std::clamp(GLint((uv.left + uv.right) * 0.5f * texture_height),
++                                         0, texture_height - 1);
++                    glGenFramebuffers(1, &probe_fbo);
++                    glBindFramebuffer(GL_READ_FRAMEBUFFER, probe_fbo);
++                    glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
++                                           GL_TEXTURE_2D, screen_info.display_texture, 0);
++                    status = glCheckFramebufferStatus(GL_READ_FRAMEBUFFER);
++                    if (status == GL_FRAMEBUFFER_COMPLETE) {
++                        glReadBuffer(GL_COLOR_ATTACHMENT0);
++                        glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
++                        glPixelStorei(GL_PACK_ALIGNMENT, 1);
++                        glPixelStorei(GL_PACK_ROW_LENGTH, 0);
++                        glPixelStorei(GL_PACK_SKIP_ROWS, 0);
++                        glPixelStorei(GL_PACK_SKIP_PIXELS, 0);
++                        while (glGetError() != GL_NO_ERROR) {}
++                        glReadPixels(probe_x, probe_y, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
++                        read_error = glGetError();
++                    }
++                }
++                glPixelStorei(GL_PACK_ALIGNMENT, old_pack);
++                glPixelStorei(GL_PACK_ROW_LENGTH, old_row);
++                glPixelStorei(GL_PACK_SKIP_ROWS, old_skip_rows);
++                glPixelStorei(GL_PACK_SKIP_PIXELS, old_skip_pixels);
++                glBindBuffer(GL_PIXEL_PACK_BUFFER, old_pbo);
++                glBindFramebuffer(GL_READ_FRAMEBUFFER, old_read_fbo);
++                glReadBuffer(old_read_buffer);
++                if (probe_fbo) glDeleteFramebuffers(1, &probe_fbo);
++                LOG_INFO(Render_OpenGL,
++                         "POCKET_HOST_TEX screen={} visit={} id={} size={}x{} uv={},{},{},{} "
++                         "layout={}x{} enabled={} rect={},{},{},{} sample={},{} rgba={},{},{},{} "
++                         "fbo={:#x} prior={:#x} texerr={:#x} readerr={:#x}",
++                         screen, visit, screen_info.display_texture, texture_width, texture_height,
++                         screen_info.display_texcoords.left, screen_info.display_texcoords.top,
++                         screen_info.display_texcoords.right, screen_info.display_texcoords.bottom,
++                         layout.width, layout.height,
++                         screen == 0 ? layout.top_screen_enabled : layout.bottom_screen_enabled,
++                         rect.left, rect.top, rect.right, rect.bottom, probe_x, probe_y,
++                         rgba[0], rgba[1], rgba[2], rgba[3], u32(status), u32(prior_error),
++                         u32(texture_error), u32(read_error));
++            }
++        }
++    }
++#endif
+ }
+ 
+ /**

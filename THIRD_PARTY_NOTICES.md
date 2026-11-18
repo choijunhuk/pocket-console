@@ -18,6 +18,14 @@ The per-ABI core artifacts include the source manifest, checksums, local patch a
 
 The official Linux libretro binary is used only in CI for host acceptance, with its own pinned checksum; it is not packaged in Android. Original 3DS test code under `tests/three_ds` uses the open devkitPro/libctru toolchain. Its emulator-specific audio test follows devkitPro's documented DSP HLE zero-byte stand-in; no dumped Nintendo DSP firmware is bundled.
 
-## Switch and Switch 2 candidates
+## Switch homebrew
 
-Eden and Hokkaido are research candidates, not bundled backends in this revision. Hokkaido's narrow maintainer-reported Switch 2 results do not establish Galaxy S23 Ultra or broad Android compatibility. Keep engine readiness separate from device prerequisites and catalog classification.
+The ARM64 APK embeds the [Hokkaido](https://github.com/pavelgajdo/Hokkaido) native SDK at the exact commit in `third_party/switch-hokkaido.lock.json`, licensed GPL-3.0-or-later. `switch/native/` and the Switch preparation/build scripts contain Pocket Console's local changes. The pinned SDK artifact includes its runtime dependency closure, source/build manifest, license inventory and SHA-256 checksums. Its producer run and artifact digest are pinned in `third_party/switch-sdk.lock.json`.
+
+The release source archive includes the pinned Hokkaido checkout and its recursively pinned Git submodules, along with Pocket Console's tracked source and build scripts. It does not include Hokkaido's build-time CPM cache; the build fetches those dependencies from their pinned upstream URLs, so source reproduction still depends on those URLs remaining available. No keys, firmware, games or homebrew files are included in the APK. This experimental NRO path does not establish general Switch or Switch 2 game compatibility.
+
+The CI SDK artifact is retained for 90 days. If it expires, Android/release packaging stops; rerun `switch-sdk.yml` at the intended source commit, verify the new artifact and update `third_party/switch-sdk.lock.json` before releasing.
+
+## Khronos host-test headers
+
+Linux host tests download exact Khronos EGL/OpenGL registry headers listed in `third_party/host-graphics.lock.json`. Every header is checked by SHA-256 and retains its original copyright and license notice. These development headers are not bundled in the Android APK. Rendering still uses the runner's installed Mesa libraries; no replacement renderer or synthetic frames are supplied.
