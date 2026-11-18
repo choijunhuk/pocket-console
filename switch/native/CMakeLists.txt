@@ -82,7 +82,13 @@ foreach(source IN LISTS upstream_sources)
         set(offline_udp_before [=[        m_input_subsystem.Initialize();]=])
         set(offline_udp_after [=[        Settings::values.udp_input_servers.SetValue("");
         m_input_subsystem.Initialize();]=])
-        foreach(patch IN ITEMS run scope wait surface start_core offline_udp)
+        set(stop_core_before [=[    // Unload user input.
+    m_system.HIDCore().UnloadInputDevices();]=])
+        set(stop_core_after [=[    // Suspend the guest before GPU shutdown can invalidate its in-flight NVDRV requests.
+    if (m_load_result == Core::SystemResultStatus::Success) m_system.Pause();
+    // Unload user input.
+    m_system.HIDCore().UnloadInputDevices();]=])
+        foreach(patch IN ITEMS run scope wait surface start_core offline_udp stop_core)
             string(FIND "${native_source}" "${${patch}_before}" patch_location)
             if(patch_location LESS 0)
                 message(FATAL_ERROR "Pinned ${patch} source seam changed")

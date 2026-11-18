@@ -13,7 +13,7 @@
 #include <string_view>
 
 namespace {
-std::string PocketVulkanDiagnostic() {
+std::string PocketVulkanDiagnostic(bool warnings = false) {
     void* library = dlopen("libvulkan.so", RTLD_NOW | RTLD_LOCAL);
     if (!library) return "Vulkan loader unavailable";
     SCOPE_EXIT { dlclose(library); };
@@ -23,14 +23,30 @@ std::string PocketVulkanDiagnostic() {
         get(VK_NULL_HANDLE, "vkEnumerateInstanceVersion"));
     uint32_t api = VK_API_VERSION_1_0;
     if (!version || version(&api) != VK_SUCCESS || api < VK_API_VERSION_1_3)
-        return "Vulkan 1.3 loader required";
+        return "Vulkan 1.3 loader required by renderer instance";
+    const auto enumerate = reinterpret_cast<PFN_vkEnumerateInstanceExtensionProperties>(
+        get(VK_NULL_HANDLE, "vkEnumerateInstanceExtensionProperties"));
+    uint32_t count{};
+    if (!enumerate || enumerate(nullptr, &count, nullptr) != VK_SUCCESS)
+        return "Vulkan instance extension enumeration failed";
+    std::vector<VkExtensionProperties> instance_extensions(count);
+    if (enumerate(nullptr, &count, instance_extensions.data()) != VK_SUCCESS)
+        return "Vulkan instance extension enumeration failed";
+    const char* required[] = {"VK_KHR_surface", "VK_KHR_android_surface"};
+    for (const char* extension : required) {
+        if (std::none_of(instance_extensions.begin(), instance_extensions.end(), [&](const auto& item) {
+                return std::string_view(item.extensionName) == extension;
+            })) return std::string("Missing instance extension ") + extension;
+    }
     const auto create = reinterpret_cast<PFN_vkCreateInstance>(get(VK_NULL_HANDLE, "vkCreateInstance"));
     if (!create) return "Vulkan vkCreateInstance unavailable";
     const VkApplicationInfo application{.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
                                         .pApplicationName = "Pocket Console capability check",
                                         .apiVersion = VK_API_VERSION_1_3};
     const VkInstanceCreateInfo info{.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-                                    .pApplicationInfo = &application};
+                                    .pApplicationInfo = &application,
+                                    .enabledExtensionCount = 2,
+                                    .ppEnabledExtensionNames = required};
     VkInstance instance{};
     const auto result = create(&info, nullptr, &instance);
     if (result != VK_SUCCESS) return "Vulkan instance failed: " + std::to_string(result);
@@ -43,9 +59,10 @@ std::string PocketVulkanDiagnostic() {
     POCKET_VK_FUNCTION(vkEnumeratePhysicalDevices);
     POCKET_VK_FUNCTION(vkGetPhysicalDeviceProperties);
     POCKET_VK_FUNCTION(vkGetPhysicalDeviceFeatures2);
+    POCKET_VK_FUNCTION(vkGetPhysicalDeviceQueueFamilyProperties);
     POCKET_VK_FUNCTION(vkEnumerateDeviceExtensionProperties);
 #undef POCKET_VK_FUNCTION
-    uint32_t count{};
+    count = 0;
     if (vkEnumeratePhysicalDevices(instance, &count, nullptr) != VK_SUCCESS || !count)
         return "Vulkan physical device unavailable";
     std::vector<VkPhysicalDevice> devices(count);
@@ -56,29 +73,39 @@ std::string PocketVulkanDiagnostic() {
     VkPhysicalDeviceProperties properties{};
     vkGetPhysicalDeviceProperties(device, &properties);
     const std::string name = properties.deviceName;
-    if (properties.apiVersion < VK_API_VERSION_1_3)
-        return name + ": Vulkan 1.3 required; actual " +
+    if (properties.apiVersion < VK_API_VERSION_1_1)
+        return name + ": Vulkan 1.1 required; actual " +
                std::to_string(VK_VERSION_MAJOR(properties.apiVersion)) + "." +
                std::to_string(VK_VERSION_MINOR(properties.apiVersion));
-    VkPhysicalDeviceVulkan13Features v13{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
-    VkPhysicalDeviceVulkan12Features v12{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
-                                         .pNext = &v13};
-    VkPhysicalDeviceVulkan11Features v11{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
-                                         .pNext = &v12};
+    VkPhysicalDeviceTimelineSemaphoreFeatures timeline{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES};
+    VkPhysicalDeviceVariablePointersFeatures variable_pointer{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES, .pNext = &timeline};
+    VkPhysicalDeviceShaderDrawParametersFeatures shader_draw_parameters{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES,
+        .pNext = &variable_pointer};
+    VkPhysicalDeviceShaderDemoteToHelperInvocationFeatures shader_demote_to_helper_invocation{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DEMOTE_TO_HELPER_INVOCATION_FEATURES,
+        .pNext = &shader_draw_parameters};
+    VkPhysicalDeviceHostQueryResetFeatures host_query_reset{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES,
+        .pNext = &shader_demote_to_helper_invocation};
     VkPhysicalDeviceFeatures2 queried{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
-                                      .pNext = &v11};
+                                      .pNext = &host_query_reset};
     vkGetPhysicalDeviceFeatures2(device, &queried);
     const auto& features = queried.features;
-    const auto& host_query_reset = v12;
-    const auto& shader_demote_to_helper_invocation = v13;
-    const auto& shader_draw_parameters = v11;
-    const auto& variable_pointer = v11;
+    vkGetPhysicalDeviceQueueFamilyProperties(device, &count, nullptr);
+    std::vector<VkQueueFamilyProperties> queues(count);
+    vkGetPhysicalDeviceQueueFamilyProperties(device, &count, queues.data());
+    if (std::none_of(queues.begin(), queues.end(), [](const auto& queue) {
+            return queue.queueCount && (queue.queueFlags & VK_QUEUE_GRAPHICS_BIT);
+        })) return name + ": Vulkan graphics queue unavailable";
     std::string missing;
     const auto add = [&](const char* item) {
         if (!missing.empty()) missing += ", ";
         missing += item;
     };
-    // Share the pinned renderer's requirement lists so the gate cannot silently drift.
+    // Upstream logs unsuitable drivers and continues; these features are advisory.
 #define POCKET_REQUIRED_FEATURE(group, field) if (!group.field) add(#field);
     FOR_EACH_VK_MANDATORY_FEATURE(POCKET_REQUIRED_FEATURE)
 #undef POCKET_REQUIRED_FEATURE
@@ -95,12 +122,24 @@ std::string PocketVulkanDiagnostic() {
 #define POCKET_REQUIRED_EXTENSION(extension) require_extension(extension);
     FOR_EACH_VK_MANDATORY_EXTENSION(POCKET_REQUIRED_EXTENSION)
 #undef POCKET_REQUIRED_EXTENSION
-    require_extension(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
-    // Submission completion is needed even for the original framebuffer-only homebrew.
-    if (!v12.timelineSemaphore) add("timelineSemaphore");
-    return missing.empty() ? "" : name + ": missing " + missing;
+    if (std::none_of(extensions.begin(), extensions.end(), [](const auto& extension) {
+            return std::string_view(extension.extensionName) == VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+        })) return name + ": missing " + VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+    // MasterSemaphore uses fences when timeline semaphores are unavailable.
+    if (!timeline.timelineSemaphore) add("timelineSemaphore");
+    return warnings && !missing.empty() ? missing : "";
 }
+
 } // namespace
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_org_yuzu_yuzu_1emu_NativeLibrary_pocketVulkanWarning(JNIEnv* env, jclass) {
+    try {
+        return env->NewStringUTF(PocketVulkanDiagnostic(true).c_str());
+    } catch (const std::exception&) {
+        return env->NewStringUTF("Vulkan capability query failed");
+    }
+}
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_org_yuzu_yuzu_1emu_NativeLibrary_pocketVulkanDiagnostic(JNIEnv* env, jclass) {

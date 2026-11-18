@@ -6,6 +6,16 @@ import org.yuzu.yuzu_emu.applets.keyboard.SoftwareKeyboard;
 
 public final class SwitchNativeLibraryTest {
     public static void main(String[] args) throws Exception {
+        Method warning = NativeLibrary.class.getDeclaredMethod("formatVulkanWarning", String.class);
+        warning.setAccessible(true);
+        if (!"".equals(warning.invoke(null, "")) || !"".equals(warning.invoke(null, (Object) null)))
+            throw new AssertionError("Supported GPU must not show a missing-feature warning");
+        String note = (String) warning.invoke(null, "geometryShader, logicOp, wideLines, timelineSemaphore");
+        if (!note.contains("geometryShader, logicOp, wideLines 외 1개")
+                || !note.contains("게임이 시작되지 않을 수 있어요."))
+            throw new AssertionError("GPU warning must name missing features and explain the risk");
+        if (((String) warning.invoke(null, "logicOp")).contains("외 "))
+            throw new AssertionError("Single missing feature must not invent extra features");
         File parent = Files.createTempDirectory("pocket-switch-path-").toFile();
         File files = new File(parent, "files");
         File sibling = new File(parent, "files-other");

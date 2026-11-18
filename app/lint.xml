@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!-- Pinned SDL Java is staged verbatim from the Switch SDK; keep lint active for app code. -->
+    <issue id="all">
+        <ignore path="../.cache/switch-jni/java/org/libsdl/app" />
+    </issue>
+</lint>

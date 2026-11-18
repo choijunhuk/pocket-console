@@ -32,6 +32,25 @@ public final class NativeLibrary {
 
     public static native int probeNativeBridge();
     public static native String pocketVulkanDiagnostic();
+    public static native String pocketVulkanWarning();
+
+    public static String switchVulkanWarning() {
+        try {
+            String missing = pocketVulkanWarning();
+            return formatVulkanWarning(missing);
+        } catch (LinkageError error) {
+            return "GPU 호환성을 확인하지 못했어요. 게임이 시작되지 않을 수 있어요.";
+        }
+    }
+
+    private static String formatVulkanWarning(String missing) {
+        if (missing == null || missing.isEmpty()) return "";
+        String[] items = missing.split(", ");
+        String names = String.join(", ", java.util.Arrays.copyOf(items, Math.min(3, items.length)));
+        if (items.length > 3) names += " 외 " + (items.length - 3) + "개";
+        return "GPU 기능 부족: " + names
+                + ". 그래픽이 잘못 표시되거나 게임이 시작되지 않을 수 있어요.";
+    }
 
     public static String switchVulkanDiagnostic() {
         try {

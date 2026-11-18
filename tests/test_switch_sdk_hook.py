@@ -109,6 +109,14 @@ void EmulationSession::SurfaceChanged() {
 void Java_org_yuzu_yuzu_1emu_NativeLibrary_stopEmulation(JNIEnv* env, jclass clazz) {
     EmulationSession::GetInstance().HaltEmulation();
 }
+void EmulationSession::ShutdownEmulation() {
+    m_is_running = false;
+    // Unload user input.
+    m_system.HIDCore().UnloadInputDevices();
+    if (m_load_result == Core::SystemResultStatus::Success) {
+        m_system.ShutdownMainProcess();
+    }
+}
 void EmulationSession::RunEmulation() {
     {
         std::scoped_lock lock(m_mutex);
@@ -179,6 +187,11 @@ void waitLoop() {
             self.assertIn("if (!m_is_running || !m_window || pocket_stop_gate.Requested())", generated)
             self.assertIn("if (pocket_stop_gate.Requested()) return;\n    void(m_system.Run());", generated)
             self.assertIn('Settings::values.udp_input_servers.SetValue("");\n        m_input_subsystem.Initialize();', generated)
+            pause = generated.index("if (m_load_result == Core::SystemResultStatus::Success) m_system.Pause();")
+            unload = generated.index("m_system.HIDCore().UnloadInputDevices();")
+            shutdown = generated.index("m_system.ShutdownMainProcess();")
+            self.assertLess(pause, unload)
+            self.assertLess(pause, shutdown)
             offline_bsd = (build / "pocket-switch-sdk/offline-bsd.cpp").read_text()
             offline_net = (build / "pocket-switch-sdk/offline-network.cpp").read_text()
             self.assertIn("socketpair(AF_UNIX, SOCK_DGRAM, 0, fds)", offline_bsd)

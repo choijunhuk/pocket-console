@@ -48,6 +48,7 @@ import org.yuzu.yuzu_emu.NativeLibrary;
 
 public final class MainActivity extends Activity {
     private static final int PICK_FILE = 10;
+    private static final int PLAY_SWITCH = 11;
     private int PAPER, INK, QUIET, ORANGE, SHELL;
     private ConsoleUi ui;
     private DeviceCapabilities capabilities;
@@ -56,6 +57,7 @@ public final class MainActivity extends Activity {
     private boolean switchPackaged;
     private boolean switchPresenceChecked;
     private String switchDiagnostic = "Switch 엔진을 확인하고 있어요.";
+    private String switchWarning = "";
     private static final String KEY_CONSOLE = "console";
     private static final String KEY_PREVIEW = "preview";
     private static final String UI_PREFS = "console_ui";
@@ -120,10 +122,12 @@ public final class MainActivity extends Activity {
             String diagnostic = !packaged ? "Switch 엔진이 이 빌드에 없어요."
                     : support.state != DeviceCapabilities.Compatibility.State.READY
                     ? support.reason : NativeLibrary.switchVulkanDiagnostic();
+            String warning = diagnostic.isEmpty() ? NativeLibrary.switchVulkanWarning() : "";
             MAIN.post(() -> {
                 if (!isDestroyed() && !isFinishing()) {
                     switchPackaged = packaged;
                     switchDiagnostic = diagnostic;
+                    switchWarning = warning;
                     switchPresenceChecked = true;
                     if (!preview) render();
                 }
@@ -375,7 +379,7 @@ public final class MainActivity extends Activity {
                 && check.state == DeviceCapabilities.Compatibility.State.READY
                 ? "3DS 엔진이 이 빌드에 없어요. 설치 후 실제 실행을 확인합니다."
                 : selected == ConsoleType.SWITCH ? check.state == DeviceCapabilities.Compatibility.State.READY
-                        ? switchDiagnostic : check.reason
+                        ? switchDiagnostic.isEmpty() ? switchWarning : switchDiagnostic : check.reason
                 : (selected == ConsoleType.DS || selected == ConsoleType.THREE_DS)
                 ? check.reason : "게임 실행 엔진은 아직 연결되지 않았어요.";
         page.addView(text(detail, 13, QUIET, false));
@@ -453,6 +457,10 @@ public final class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (request == PLAY_SWITCH) {
+            if (data != null) showNotice(data.getStringExtra(Switch2PlayerActivity.EXTRA_FAILURE));
+            return;
+        }
         if (request != PICK_FILE) return;
         if (result != RESULT_OK || data == null || data.getData() == null) {
             showNotice("파일 가져오기를 취소했어요.");
@@ -618,7 +626,7 @@ public final class MainActivity extends Activity {
                 player.putExtra(Switch2PlayerActivity.EXTRA_GAME_PATH, ready.getAbsolutePath());
                 player.putExtra("delete_cached_nro", true);
                 try {
-                    activity.startActivity(player);
+                    activity.startActivityForResult(player, PLAY_SWITCH);
                 } catch (RuntimeException launchError) {
                     ready.delete();
                     activity.showNotice("Switch 실행 화면을 열 수 없어요.");
