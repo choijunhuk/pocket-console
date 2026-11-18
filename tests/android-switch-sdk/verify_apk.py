@@ -11,6 +11,8 @@ from pathlib import Path
 def verify(apk, sdk):
     manifest = json.loads((sdk / "runtime-deps.json").read_text())
     expected = {entry["name"]: entry["sha256"] for entry in manifest["libraries"]}
+    if not {"libhook_impl.so", "libmain_hook.so"} <= expected.keys():
+        raise ValueError("SDK runtime is missing Vulkan loader hooks")
     with zipfile.ZipFile(apk) as package:
         actual = {name.removeprefix("lib/arm64-v8a/"): name
                   for name in package.namelist() if name.startswith("lib/arm64-v8a/")

@@ -23,10 +23,12 @@ class VerifyApkTest(unittest.TestCase):
         content = b"test-only ELF bytes"
         self.digest = hashlib.sha256(content).hexdigest()
         (self.root / "runtime-deps.json").write_text(json.dumps({
-            "libraries": [{"name": "libpocket_switch2.so", "sha256": self.digest}]
+            "libraries": [{"name": name, "sha256": self.digest} for name in
+                          ("libpocket_switch2.so", "libhook_impl.so", "libmain_hook.so")]
         }))
         with zipfile.ZipFile(self.apk, "w") as package:
-            package.writestr("lib/arm64-v8a/libpocket_switch2.so", content)
+            for name in ("libpocket_switch2.so", "libhook_impl.so", "libmain_hook.so"):
+                package.writestr("lib/arm64-v8a/" + name, content)
 
     def test_accepts_exact_arm64_closure(self):
         with redirect_stdout(io.StringIO()):
@@ -36,6 +38,15 @@ class VerifyApkTest(unittest.TestCase):
         with zipfile.ZipFile(self.apk, "a") as package:
             package.writestr("lib/x86_64/libextra.so", b"extra")
         with self.assertRaisesRegex(ValueError, "x86 native code"):
+            verify_apk.verify(self.apk, self.root)
+
+    def test_rejects_matching_but_incomplete_vulkan_closure(self):
+        (self.root / "runtime-deps.json").write_text(json.dumps({
+            "libraries": [{"name": "libpocket_switch2.so", "sha256": self.digest}]
+        }))
+        with zipfile.ZipFile(self.apk, "w") as package:
+            package.writestr("lib/arm64-v8a/libpocket_switch2.so", b"test-only ELF bytes")
+        with self.assertRaisesRegex(ValueError, "Vulkan loader hooks"):
             verify_apk.verify(self.apk, self.root)
 
 

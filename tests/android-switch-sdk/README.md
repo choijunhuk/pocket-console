@@ -13,7 +13,10 @@ python3 tests/android-switch-sdk/prepare.py SDK_ARTIFACT_DIR ORIGINAL_SMOKE_NRO
 ```
 
 `prepare.py` checks the exact DSO set and hashes from `runtime-deps.json`,
-unresolved DT_NEEDED names, SDL Java paths, and the NRO header. The separate
+unresolved DT_NEEDED names, SDL Java paths, and the NRO header. The closure must
+also include `libhook_impl.so` and `libmain_hook.so`, which adrenotools opens with
+`dlopen`. The APK extracts native libraries so its loader can open those paths.
+The separate
 `switch-sdk-smoke.yml` workflow runs when its own smoke files change, using
 successful SDK and NRO artifact run IDs (overrideable by manual dispatch). It
 checks out the SDK run's exact source commit for the linked Java files, then
@@ -28,7 +31,10 @@ but the device's Vulkan prerequisite is below 1.3; it is not game or graphics
 acceptance. Missing capability data and native failures remain failures or
 explicit unknown states. A physical ARM64 device is still needed for device
 performance and broader game compatibility.
-The default SDK artifact is successful run `43235268180` at producer commit
-`fbee5561d8dc9b090ae01fdea5a11333dbdd38d4`. Its generation-fenced native
-API and Java cancellation have local test coverage; Android runtime acceptance
-is pending. This smoke does not authorize release.
+The workflow's historical default SDK run `43235268180` and the later run
+`43692879856` lack the Vulkan hook libraries; staging now rejects them. Build a
+hook-complete SDK and select its run ID with `sdk_run_id` on manual dispatch.
+The CI shell runner requires x86 ARM translation; on a native ARM64 emulator,
+install both APKs with `adb -s SERIAL` and invoke the same instrumentation directly.
+Android frame/input/shutdown/reopen acceptance remains pending. This smoke does
+not authorize release.

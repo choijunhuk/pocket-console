@@ -15,7 +15,11 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     packaging {
-        jniLibs { keepDebugSymbols.add("**/*.so") }
+        jniLibs {
+            keepDebugSymbols.add("**/*.so")
+            // Adrenotools opens its hooks by path in nativeLibraryDir.
+            useLegacyPackaging = true
+        }
     }
     sourceSets {
         getByName("main") {

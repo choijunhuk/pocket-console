@@ -70,6 +70,7 @@ class ProjectHookTests(unittest.TestCase):
                 "void eager_keyboard() {}\n"
             )
             (root / "src/common/common.cpp").write_text("void common_code() {}\n")
+            (root / "src/common/hook.cpp").write_text("void hook() {}\n")
             (root / "src/android/app/src/main/jni/native.cpp").write_text(
                 """struct EmulationSession { int System() { return 0; } };
 static EmulationSession s_instance;
@@ -116,9 +117,13 @@ void waitLoop() {
                 "cmake_minimum_required(VERSION 3.19)\n"
                 "project(HokkaidoProbe LANGUAGES CXX)\n"
                 "add_library(common STATIC src/common/common.cpp)\n"
+                "add_library(hook_impl SHARED src/common/hook.cpp)\n"
+                "add_library(main_hook SHARED src/common/hook.cpp)\n"
                 "target_sources(common PUBLIC src/common/android/id_cache.cpp)\n"
                 "target_sources(common PUBLIC src/common/android/applets/software_keyboard.cpp)\n"
                 "add_subdirectory(src/android/app/src/main/jni)\n"
+                "file(GENERATE OUTPUT \"${CMAKE_BINARY_DIR}/pocket-sdk-dependencies.txt\" "
+                "CONTENT \"$<TARGET_PROPERTY:pocket_switch2,MANUALLY_ADDED_DEPENDENCIES>\")\n"
             )
             build = root / "build"
             result = subprocess.run(
@@ -135,6 +140,8 @@ void waitLoop() {
                 capture_output=True, text=True, check=True,
             ).stdout
             self.assertIn("pocket_switch2", targets)
+            self.assertEqual(set((build / "pocket-sdk-dependencies.txt").read_text().split(";")),
+                             {"hook_impl", "main_hook"})
             compiled = {pathlib.Path(item["file"]).resolve() for item in
                         json.loads((build / "compile_commands.json").read_text())}
             self.assertNotIn(root / "src/common/android/id_cache.cpp", compiled)

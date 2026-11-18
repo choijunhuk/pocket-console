@@ -44,6 +44,8 @@ def stage(sdk, nro, producer=None):
     names = {entry["name"] for entry in entries}
     if len(names) != len(entries) or "libpocket_switch2.so" not in names:
         raise ValueError("SDK runtime library names are invalid")
+    if not {"libhook_impl.so", "libmain_hook.so"} <= names:
+        raise ValueError("SDK runtime is missing Vulkan loader hooks")
     source = sdk / "runtime" / "arm64-v8a"
     actual = {path.name for path in source.glob("*.so")}
     if actual != names:

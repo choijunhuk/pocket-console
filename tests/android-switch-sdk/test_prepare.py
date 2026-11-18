@@ -24,10 +24,13 @@ class PrepareTest(unittest.TestCase):
         runtime.mkdir(parents=True)
         self.binary = runtime / "libpocket_switch2.so"
         self.binary.write_bytes(b"test-only closure bytes")
+        for hook in ("libhook_impl.so", "libmain_hook.so"):
+            (runtime / hook).write_bytes(b"test-only hook bytes")
         (self.sdk / "runtime-deps.json").write_text(json.dumps({
             "abi": "arm64-v8a", "android_api": 33,
-            "libraries": [{"name": self.binary.name, "sha256": prepare.digest(self.binary),
-                           "needed": ["liblog.so"], "origin": "test"}],
+            "libraries": [{"name": path.name, "sha256": prepare.digest(path),
+                           "needed": ["liblog.so"], "origin": "test"}
+                          for path in runtime.glob("*.so")],
             "system_needed": ["liblog.so"],
         }))
         with tarfile.open(self.sdk / "sdl-java-bootstrap.tar.gz", "w:gz") as archive:
@@ -65,6 +68,18 @@ class PrepareTest(unittest.TestCase):
         (self.binary.parent / "libextra.so").write_bytes(b"extra")
         with patch.object(prepare, "ROOT", self.stage_root):
             with self.assertRaisesRegex(ValueError, "DSO set differs"):
+                prepare.stage(self.sdk, self.nro)
+
+    def test_rejects_runtime_without_vulkan_loader_hooks(self):
+        manifest = self.sdk / "runtime-deps.json"
+        data = json.loads(manifest.read_text())
+        data["libraries"] = [entry for entry in data["libraries"]
+                             if entry["name"] == self.binary.name]
+        manifest.write_text(json.dumps(data))
+        for hook in ("libhook_impl.so", "libmain_hook.so"):
+            (self.binary.parent / hook).unlink()
+        with patch.object(prepare, "ROOT", self.stage_root):
+            with self.assertRaisesRegex(ValueError, "Vulkan loader hooks"):
                 prepare.stage(self.sdk, self.nro)
 
     def test_rejects_runtime_checksum_mismatch(self):

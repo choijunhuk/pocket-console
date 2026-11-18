@@ -54,7 +54,27 @@ def stage_bundle(stage, build, source, ndk, inspect):
             if path.is_file():
                 candidates.setdefault(path.name, []).append((origin, path))
 
+    def candidate(name, require_build=False):
+        matches = []
+        for candidate_origin, path in candidates.get(name, []):
+            if require_build and candidate_origin != "build":
+                continue
+            info = inspect(path)
+            if info is not None and info[0] == name:
+                matches.append((candidate_origin, path))
+        if not matches:
+            raise ValueError(f"Missing ARM64 runtime dependency: {name}")
+        built = [match for match in matches if match[0] == "build"]
+        if built:
+            matches = built
+        if len({digest(path) for _, path in matches}) != 1:
+            raise ValueError(f"Conflicting ARM64 runtime dependency: {name}")
+        return (name, *matches[0])
+
     pending = [(main.name, "sdk", main)]
+    # libadrenotools opens these with dlopen, so DT_NEEDED alone cannot discover them.
+    pending.extend(candidate(name, require_build=True)
+                   for name in ("libhook_impl.so", "libmain_hook.so"))
     visited = set()
     libraries = []
     system_needed = set()
@@ -82,19 +102,7 @@ def stage_bundle(stage, build, source, ndk, inspect):
             if dependency == "libc++_shared.so":
                 pending.append((dependency, "ndk-28.2.13676358", cxx))
                 continue
-            matches = []
-            for candidate_origin, candidate in candidates.get(dependency, []):
-                candidate_info = inspect(candidate)
-                if candidate_info is not None and candidate_info[0] == dependency:
-                    matches.append((candidate_origin, candidate))
-            if not matches:
-                raise ValueError(f"Missing ARM64 runtime dependency: {dependency}")
-            built = [match for match in matches if match[0] == "build"]
-            if built:
-                matches = built
-            if len({digest(candidate) for _, candidate in matches}) != 1:
-                raise ValueError(f"Conflicting ARM64 runtime dependency: {dependency}")
-            pending.append((dependency, *matches[0]))
+            pending.append(candidate(dependency))
 
     manifest = {"abi": "arm64-v8a", "android_api": 33,
                 "libraries": sorted(libraries, key=lambda item: item["name"]),

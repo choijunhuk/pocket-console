@@ -31,6 +31,9 @@ class RuntimeBundleTest(unittest.TestCase):
         self.source.mkdir()
         (self.stage / "libpocket_switch2.so").write_bytes(b"main")
         (self.build / "libSDL3.so").write_bytes(b"SDL")
+        (self.build / "libhook_impl.so").write_bytes(b"Vulkan hook implementation")
+        (self.build / "libmain_hook.so").write_bytes(b"Vulkan hook entry")
+        (self.build / "libhookdep.so").write_bytes(b"hook dependency")
         (self.source / "libavcodec.so").write_bytes(b"FFmpeg")
 
     @staticmethod
@@ -39,6 +42,9 @@ class RuntimeBundleTest(unittest.TestCase):
             "libpocket_switch2.so": ("libpocket_switch2.so", ["libSDL3.so", "libc++_shared.so", "liblog.so"]),
             "libSDL3.so": ("libSDL3.so", ["libavcodec.so", "liblog.so"]),
             "libavcodec.so": ("libavcodec.so", ["libc++_shared.so"]),
+            "libhook_impl.so": ("libhook_impl.so", ["libhookdep.so", "liblog.so"]),
+            "libmain_hook.so": ("libmain_hook.so", ["libhook_impl.so"]),
+            "libhookdep.so": ("libhookdep.so", ["liblog.so"]),
             "libc++_shared.so": ("libc++_shared.so", ["liblog.so"]),
         }.get(path.name)
 
@@ -47,7 +53,8 @@ class RuntimeBundleTest(unittest.TestCase):
                                         self.ndk, self.inspect)
         names = {entry["name"] for entry in manifest["libraries"]}
         self.assertEqual(names, {"libpocket_switch2.so", "libSDL3.so",
-                                 "libavcodec.so", "libc++_shared.so"})
+                                 "libavcodec.so", "libc++_shared.so",
+                                 "libhook_impl.so", "libmain_hook.so", "libhookdep.so"})
         self.assertEqual(manifest["system_needed"], ["liblog.so"])
         self.assertEqual({path.name for path in (self.stage / "runtime/arm64-v8a").iterdir()}, names)
         self.assertEqual((self.stage / "runtime/arm64-v8a/libc++_shared.so").read_bytes(),
@@ -74,6 +81,20 @@ class RuntimeBundleTest(unittest.TestCase):
     def test_rejects_missing_dependency(self):
         (self.build / "libSDL3.so").unlink()
         with self.assertRaisesRegex(ValueError, "Missing ARM64 runtime dependency"):
+            runtime.stage_bundle(self.stage, self.build, self.source,
+                                 self.ndk, self.inspect)
+
+    def test_rejects_missing_runtime_vulkan_hook(self):
+        (self.build / "libmain_hook.so").unlink()
+        with self.assertRaisesRegex(ValueError, "Missing ARM64 runtime dependency: libmain_hook.so"):
+            runtime.stage_bundle(self.stage, self.build, self.source,
+                                 self.ndk, self.inspect)
+
+    def test_rejects_conflicting_runtime_vulkan_hook(self):
+        duplicate = self.build / "other/libmain_hook.so"
+        duplicate.parent.mkdir()
+        duplicate.write_bytes(b"conflicting Vulkan hook")
+        with self.assertRaisesRegex(ValueError, "Conflicting ARM64 runtime dependency: libmain_hook.so"):
             runtime.stage_bundle(self.stage, self.build, self.source,
                                  self.ndk, self.inspect)
 
