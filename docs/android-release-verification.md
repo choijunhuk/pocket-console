@@ -4,6 +4,25 @@
 
 The staged merge adds the pinned Switch SDK to Android debug and alpha-release packaging. The published alpha.4 APK below is unchanged and does **not** contain this integration. The same Pocket Console APK runs experimental original `.nro` homebrew; it does not launch another emulator. Source/runtime checks, emulator results and pending release gates are recorded in [Switch verification](switch-verification.md). No physical-device, Switch audio, commercial-game or Switch 2 game acceptance is claimed.
 
+## 0.3.0-alpha.5
+
+Published 2026-11-18 23:39:48 UTC as a public GitHub prerelease.
+
+- [Release and assets](https://github.com/choijunhuk/pocket-console/releases/tag/v0.3.0-alpha.5)
+- [Download APK](https://github.com/choijunhuk/pocket-console/releases/download/v0.3.0-alpha.5/PocketConsole-v0.3.0-alpha.5.apk)
+- [Complete release workflow](https://github.com/choijunhuk/pocket-console/actions/runs/44421082889): all nine jobs passed.
+- Source: `3618aa57d5c578901c91e1f88627ef51830bee7b`; package `dev.pocketconsole`, code `8`, name `0.3.0-alpha.5`
+- APK: 36,801,747 bytes; SHA-256 `6117ae3fbcc9805ab20bee9cac12125c01ce2664ad585b54b99ba3a4be6ff666`
+- Source archive SHA-256: `f5608187d12b5b939121a13e48fd1791b9f93de271eea34c968d3c53db5cda44`
+- Signer SHA-256 (DER): `e95c85ff0887c8bbcaebdb90238f4b6dd4ce0b8b5245f6b59c2aa15c49c5320a`, unchanged from earlier official alphas.
+- Switch SDK: `switch-sdk.yml` run 44416880188 at `eb2354c`, pinned in `third_party/switch-sdk.lock.json`; the workflow emitted `SWITCH_SDK_PRODUCER_PASS` and `SWITCH_JNI_PREPARATION_PASS`.
+
+An independent public download matched `SHA256SUMS`, the official signer, code/name above and no requested permissions. The arm64-v8a ABI contains `libpocket_switch2.so`, `libhook_impl.so` and `libmain_hook.so`; x86_64 contains no Switch engine. The APK is smaller than alpha.4 because native libraries are now stored compressed and extracted at install (`extractNativeLibs=true`), which the Switch Vulkan driver-hook loader requires.
+
+The release Android smoke artifact contains `DS_ANDROID_SMOKE_PASS`, `DS_DISPLAY_LAYOUT_PASS`, `THREEDS_DISPLAY_UI_PASS (layout only)` and `THREEDS_ANDROID_SMOKE_NOT_RUN_EXPERIMENTAL`; the release log contains `DS_SAVE_FLUSH_PASS`, `DS_NATIVE_SMOKE_PASS` and `THREEDS_NATIVE_SMOKE_PASS` in both 3DS host paths.
+
+Switch homebrew acceptance comes only from a native ARM64 emulator (37.2.13, SwiftShader Vulkan): original NRO frame and A input, launch/exit/relaunch from the library, dark-mode change mid-session, six malformed NROs rejected before native load, and no Switch library mapped in the main process. CI Switch frames are `NRO_NOT_RUN_TRANSLATED_ABI` because that runner translates ARM64. Physical-device Switch and 3DS execution, Switch audio, commercial content and Switch 2 game compatibility were not tested.
+
 ## 0.3.0-alpha.4
 
 Published 2026-11-17 11:00:35 UTC as a public GitHub prerelease.

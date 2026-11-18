@@ -1,6 +1,6 @@
 # Pocket Console
 
-[Android 알파 APK 다운로드](https://github.com/choijunhuk/pocket-console/releases/download/v0.3.0-alpha.4/PocketConsole-v0.3.0-alpha.4.apk) · [릴리스와 배포 파일](https://github.com/choijunhuk/pocket-console/releases/tag/v0.3.0-alpha.4) · Android 8.0+ ARM64/x86_64. 공개 APK는 DS·UI와 3DS 호스트 검증을 통과한 alpha.4입니다. 아래 Switch 홈브루 기능은 다음 릴리스를 준비하는 개발 트리의 범위이며, 이 다운로드에는 포함되지 않습니다.
+[Android 알파 APK 다운로드](https://github.com/choijunhuk/pocket-console/releases/download/v0.3.0-alpha.5/PocketConsole-v0.3.0-alpha.5.apk) · [릴리스와 배포 파일](https://github.com/choijunhuk/pocket-console/releases/tag/v0.3.0-alpha.5) · Android 8.0+ ARM64/x86_64. 공개 APK는 DS·UI와 3DS 호스트 검증을 통과한 alpha.5이며, Switch 홈브루 `.nro` 실험 실행을 포함합니다(ARM64 Android 13 이상, 에뮬레이터 검증만).
 
 Android에서 **DS · 3DS · Switch · Switch 2를 실제 휴대용 게임기처럼 다루는 경험**을 목표로 하는 프로젝트입니다.
 
