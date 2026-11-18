@@ -38,8 +38,8 @@ android {
         applicationId = "dev.pocketconsole"
         minSdk = 26
         targetSdk = 36
-        versionCode = 7
-        versionName = "0.3.0-alpha.4"
+        versionCode = 8
+        versionName = "0.3.0-alpha.5"
         testInstrumentationRunner = providers.gradleProperty("smokeRunner")
             .orElse("dev.pocketconsole.DsSmokeInstrumentation").get()
         ndk {
