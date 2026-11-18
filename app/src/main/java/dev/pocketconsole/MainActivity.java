@@ -534,6 +534,8 @@ public final class MainActivity extends Activity {
             deleteSwitchNro();
             switchLaunching = false;
             if (data != null) showNotice(data.getStringExtra(Switch2PlayerActivity.EXTRA_FAILURE));
+            // A probe refused while a player was live is not cached; retry it now that play ended.
+            if (!switchDiagnostic.isEmpty()) checkSwitchBackend();
             return;
         }
         if (request != PICK_FILE) return;
@@ -717,8 +719,9 @@ public final class MainActivity extends Activity {
                 if (activity == null || activity.isDestroyed() || activity.isFinishing()
                         || failure != null || copy.isCancelled()) {
                     if (ready != null) ready.delete();
+                    // Static: a collected activity must not leave every later launch locked.
+                    switchLaunching = false;
                     if (activity != null) {
-                        activity.switchLaunching = false;
                         if (!activity.isDestroyed() && !activity.isFinishing())
                             activity.showNotice(copy.isCancelled() ? "Switch 파일 준비를 취소했어요." : failure);
                     }

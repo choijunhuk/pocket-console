@@ -7,7 +7,8 @@ import java.io.RandomAccessFile;
 /** Checks the private NRO copy before the pinned native loader reads it. */
 final class SwitchNroValidator {
     private static final long PAGE = 0x1000;
-    private static final long MAX_IMAGE = 2L * 1024 * 1024 * 1024;
+    // The loader reads the whole file and allocates image + BSS; homebrew images are far smaller.
+    private static final long MAX_IMAGE = 512L * 1024 * 1024;
 
     private SwitchNroValidator() {}
 

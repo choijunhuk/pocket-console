@@ -74,6 +74,9 @@ public final class SwitchNroValidatorTest {
             check(directory, data, "BSS");
             data = valid(); word(data, 0x80 + 8, 0); word(data, 0x80 + 12, 0xffffffffL);
             check(directory, data, "BSS");
+            // 512 MiB of BSS on top of the image exceeds the allocation cap the loader would attempt.
+            data = valid(); word(data, 0x80 + 8, 0); word(data, 0x80 + 12, 0x2000_0000L);
+            check(directory, data, "BSS");
             data = new byte[0x3040];
             System.arraycopy(valid(), 0, data, 0, 0x3000);
             data[0x3000] = 'A'; data[0x3001] = 'S'; data[0x3002] = 'E'; data[0x3003] = 'T';

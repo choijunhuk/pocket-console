@@ -15,7 +15,7 @@
             android:process=":switch2"
             android:exported="false"
             android:screenOrientation="sensorLandscape"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|layoutDirection|locale" />
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|layoutDirection|locale|fontScale|touchscreen|colorMode|mcc|mnc" />
         <activity
             android:name=".ThreeDsPlayerActivity"
             android:process=":three_ds"
