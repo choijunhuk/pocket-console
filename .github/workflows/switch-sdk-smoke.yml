@@ -11,7 +11,7 @@ on:
       sdk_run_id:
         description: Successful switch-sdk.yml run containing the verified runtime closure
         required: false
-        default: '44283215435'
+        default: '44416880188'
       nro_run_id:
         description: Successful switch-homebrew.yml run containing the original NRO
         required: false
@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      SDK_RUN_ID: ${{ inputs.sdk_run_id || '44283215435' }}
+      SDK_RUN_ID: ${{ inputs.sdk_run_id || '44416880188' }}
       NRO_RUN_ID: ${{ inputs.nro_run_id || '43087284012' }}
     steps:
       - uses: actions/checkout@v4
