@@ -18,6 +18,12 @@ public final class ConsoleTypeTest {
         expectImport(ConsoleType.SWITCH, "game.nro", ConsoleType.SWITCH_TWO);
         expectImport(null, "game.zip", ConsoleType.SWITCH_TWO);
         expectImport(null, null, ConsoleType.SWITCH_TWO);
+        if (!ConsoleType.isSwitchHomebrew("game.NRO")
+                || ConsoleType.isSwitchHomebrew("game.nsp")
+                || ConsoleType.isSwitchHomebrew("game.xci")) {
+            throw new AssertionError("Only NRO may enter the Switch homebrew launch path");
+        }
+        checks += 3;
         for (String name : new String[]{null, "", ".nds", "firmware.bin", "prod.keys", "game.zip", "game.nds.exe", "game", "installer.cia"}) expect(null, name);
         if (ConsoleType.DS.accepts("game.3ds") || ConsoleType.THREE_DS.accepts("game.nds")) {
             throw new AssertionError("Console formats must stay distinct");

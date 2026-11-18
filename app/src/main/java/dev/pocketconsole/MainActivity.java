@@ -30,6 +30,11 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.io.FileNotFoundException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.RandomAccessFile;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.lang.ref.WeakReference;
 import java.util.List;
 import java.util.LinkedHashSet;
@@ -39,6 +44,7 @@ import java.util.concurrent.Executors;
 import java.util.zip.ZipFile;
 import java.io.File;
 import java.io.IOException;
+import org.yuzu.yuzu_emu.NativeLibrary;
 
 public final class MainActivity extends Activity {
     private static final int PICK_FILE = 10;
@@ -47,6 +53,9 @@ public final class MainActivity extends Activity {
     private DeviceCapabilities capabilities;
     private boolean threeDsPackaged;
     private boolean threeDsPresenceChecked;
+    private boolean switchPackaged;
+    private boolean switchPresenceChecked;
+    private String switchDiagnostic = "Switch 엔진을 확인하고 있어요.";
     private static final String KEY_CONSOLE = "console";
     private static final String KEY_PREVIEW = "preview";
     private static final String UI_PREFS = "console_ui";
@@ -101,6 +110,21 @@ public final class MainActivity extends Activity {
                 if (!isDestroyed() && !isFinishing()) {
                     threeDsPackaged = packaged;
                     threeDsPresenceChecked = true;
+                    if (!preview) render();
+                }
+            });
+        });
+        DOCUMENT_IO.execute(() -> {
+            boolean packaged = hasSwitchCore(app);
+            DeviceCapabilities.Compatibility support = capabilities.check(ConsoleType.SWITCH);
+            String diagnostic = !packaged ? "Switch 엔진이 이 빌드에 없어요."
+                    : support.state != DeviceCapabilities.Compatibility.State.READY
+                    ? support.reason : NativeLibrary.switchVulkanDiagnostic();
+            MAIN.post(() -> {
+                if (!isDestroyed() && !isFinishing()) {
+                    switchPackaged = packaged;
+                    switchDiagnostic = diagnostic;
+                    switchPresenceChecked = true;
                     if (!preview) render();
                 }
             });
@@ -161,6 +185,16 @@ public final class MainActivity extends Activity {
         return frontend && core;
     }
 
+    private static boolean hasSwitchCore(Context app) {
+        String directory = app.getApplicationInfo().nativeLibraryDir;
+        if (directory == null) return false;
+        for (String name : new String[]{"libpocket_switch2.so", "libhook_impl.so",
+                "libmain_hook.so", "libc++_shared.so"}) {
+            if (!new File(directory, name).isFile()) return false;
+        }
+        return true;
+    }
+
     private DeviceCapabilities.Compatibility compatibility(ConsoleType type) {
         return capabilities.check(type);
     }
@@ -170,9 +204,23 @@ public final class MainActivity extends Activity {
                 && compatibility(type).state == DeviceCapabilities.Compatibility.State.READY;
     }
 
+    private boolean launchable(LibraryStore.Entry entry) {
+        if (entry.console == ConsoleType.SWITCH) {
+            return ConsoleType.isSwitchHomebrew(entry.name) && switchPackaged
+                    && switchPresenceChecked && switchDiagnostic.isEmpty()
+                    && compatibility(ConsoleType.SWITCH).state
+                    == DeviceCapabilities.Compatibility.State.READY;
+        }
+        return launchable(entry.console);
+    }
+
     private String readiness(ConsoleType type) {
         if (type == ConsoleType.SWITCH_TWO) return "실험적 지원 · 엔진 준비 중";
-        if (type == ConsoleType.SWITCH) return "엔진 준비 중";
+        if (type == ConsoleType.SWITCH) {
+            if (!switchPresenceChecked) return "기기 조건 확인 중";
+            if (!switchPackaged) return "엔진 준비 중";
+            return switchDiagnostic.isEmpty() ? "실험적 실행 · 호환성 미확인" : "기기 조건 미충족";
+        }
         DeviceCapabilities.Compatibility check = compatibility(type);
         if (check.state == DeviceCapabilities.Compatibility.State.UNSUPPORTED) return "기기 조건 미충족";
         if (check.state == DeviceCapabilities.Compatibility.State.UNKNOWN) return "기기 조건 확인 중";
@@ -326,6 +374,8 @@ public final class MainActivity extends Activity {
                 : selected == ConsoleType.THREE_DS && !threeDsPackaged
                 && check.state == DeviceCapabilities.Compatibility.State.READY
                 ? "3DS 엔진이 이 빌드에 없어요. 설치 후 실제 실행을 확인합니다."
+                : selected == ConsoleType.SWITCH ? check.state == DeviceCapabilities.Compatibility.State.READY
+                        ? switchDiagnostic : check.reason
                 : (selected == ConsoleType.DS || selected == ConsoleType.THREE_DS)
                 ? check.reason : "게임 실행 엔진은 아직 연결되지 않았어요.";
         page.addView(text(detail, 13, QUIET, false));
@@ -379,7 +429,7 @@ public final class MainActivity extends Activity {
     }
 
     private void drawEntry(LibraryStore.Entry entry) {
-        boolean canPlay = launchable(entry.console);
+        boolean canPlay = launchable(entry);
         Button item = button(entry.name + "  ·  " + (canPlay ? "실행" : "준비 중"), ui.raised, INK);
         item.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
         item.setPadding(dp(16), 0, dp(16), 0);
@@ -462,7 +512,11 @@ public final class MainActivity extends Activity {
     }
 
     private void openEntry(LibraryStore.Entry entry) {
-        if (launchable(entry.console)) {
+        if (launchable(entry)) {
+            if (entry.console == ConsoleType.SWITCH) {
+                launchSwitchHomebrew(entry);
+                return;
+            }
             Intent player = new Intent(this, entry.console == ConsoleType.DS
                     ? DsPlayerActivity.class : ThreeDsPlayerActivity.class);
             player.putExtra("rom_uri", entry.uri);
@@ -487,6 +541,9 @@ public final class MainActivity extends Activity {
                     String reason = activity.compatibility(entry.console).state
                             == DeviceCapabilities.Compatibility.State.UNSUPPORTED
                             ? activity.compatibility(entry.console).reason
+                            : entry.console == ConsoleType.SWITCH
+                            ? ConsoleType.isSwitchHomebrew(entry.name) ? activity.switchDiagnostic
+                                    : "NSP/XCI는 목록 등록만 지원합니다."
                             : "게임 실행 엔진을 아직 사용할 수 없어요.";
                     new AlertDialog.Builder(activity).setTitle(activity.readiness(entry.console))
                             .setMessage(entry.name + "\n\n" + reason
@@ -499,6 +556,72 @@ public final class MainActivity extends Activity {
                             .setPositiveButton("파일 다시 선택", (dialog, which) -> activity.importFile())
                             .setNeutralButton("목록에서 지우기", (dialog, which) -> activity.confirmRemoval(entry))
                             .setNegativeButton("유지", null).show();
+                }
+            });
+        });
+    }
+
+    private void launchSwitchHomebrew(LibraryStore.Entry entry) {
+        Context app = getApplicationContext();
+        WeakReference<MainActivity> target = new WeakReference<>(this);
+        showNotice("Switch 홈브루 파일을 준비하고 있어요…");
+        DOCUMENT_IO.execute(() -> {
+            File copied = null;
+            String error = null;
+            try (InputStream source = app.getContentResolver().openInputStream(Uri.parse(entry.uri))) {
+                if (source == null) throw new IOException("파일을 열 수 없어요.");
+                Path path = Files.createTempFile(app.getCacheDir().toPath(), "switch-nro-", ".nro");
+                copied = path.toFile();
+                try (OutputStream output = Files.newOutputStream(path)) {
+                    byte[] buffer = new byte[64 * 1024];
+                    long size = 0;
+                    int count;
+                    while ((count = source.read(buffer)) != -1) {
+                        if (count == 0) {
+                            int one = source.read();
+                            if (one == -1) break;
+                            buffer[0] = (byte) one;
+                            count = 1;
+                        }
+                        if (count > 2L * 1024 * 1024 * 1024 - size)
+                            throw new IOException("NRO 파일이 2 GiB를 넘습니다.");
+                        output.write(buffer, 0, count);
+                        size += count;
+                    }
+                    if (size < 0x80) throw new IOException("NRO 파일이 너무 짧아요.");
+                }
+                try (RandomAccessFile input = new RandomAccessFile(copied, "r")) {
+                    input.seek(0x10);
+                    byte[] magic = new byte[4];
+                    input.readFully(magic);
+                    if (magic[0] != 'N' || magic[1] != 'R' || magic[2] != 'O' || magic[3] != '0')
+                        throw new IOException("NRO 헤더를 확인할 수 없어요.");
+                }
+            } catch (Exception failure) {
+                error = failure.getMessage() == null ? "NRO 파일을 준비하지 못했어요." : failure.getMessage();
+            }
+            File ready = copied;
+            String failure = error;
+            MAIN.post(() -> {
+                MainActivity activity = target.get();
+                if (activity == null || activity.isDestroyed() || activity.isFinishing() || failure != null) {
+                    if (ready != null) ready.delete();
+                    if (activity != null && failure != null && !activity.isDestroyed()) activity.showNotice(failure);
+                    return;
+                }
+                if (!activity.launchable(entry)) {
+                    ready.delete();
+                    activity.showNotice("기기 조건이 바뀌어 Switch 홈브루를 실행할 수 없어요.");
+                    return;
+                }
+                Intent player = new Intent(activity, Switch2PlayerActivity.class);
+                player.putExtra(Switch2PlayerActivity.EXTRA_GAME_PATH, ready.getAbsolutePath());
+                player.putExtra("delete_cached_nro", true);
+                try {
+                    activity.startActivity(player);
+                } catch (RuntimeException launchError) {
+                    ready.delete();
+                    activity.showNotice("Switch 실행 화면을 열 수 없어요.");
                 }
             });
         });

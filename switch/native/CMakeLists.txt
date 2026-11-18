@@ -104,6 +104,91 @@ foreach(source IN LISTS upstream_sources)
     endif()
 endforeach()
 
+# Keep the pinned core tree pristine; reject drift at the two offline Android seams.
+macro(pocket_replace_exact old new label)
+    string(FIND "${content}" "${old}" found)
+    if(found LESS 0)
+        message(FATAL_ERROR "Pinned offline ${label} source seam changed")
+    endif()
+    string(LENGTH "${old}" anchor_length)
+    math(EXPR remainder_start "${found} + ${anchor_length}")
+    string(SUBSTRING "${content}" ${remainder_start} -1 remainder)
+    string(FIND "${remainder}" "${old}" duplicate)
+    if(NOT duplicate LESS 0)
+        message(FATAL_ERROR "Pinned offline ${label} source seam duplicated")
+    endif()
+    string(REPLACE "${old}" "${new}" content "${content}")
+endmacro()
+get_target_property(core_sources core SOURCES)
+foreach(patch IN ITEMS network bsd)
+    if(patch STREQUAL "network")
+        set(source "internal_network/network.cpp")
+        set(before [=[    case ENETDOWN:
+        return Errno::NETDOWN;]=])
+        set(after [=[    case ENETDOWN:
+#ifdef __ANDROID__
+    case EPERM: // Android without INTERNET permission reports network unavailable.
+#endif
+        return Errno::NETDOWN;]=])
+    else()
+        set(source "hle/service/sockets/bsd.cpp")
+        set(before [=[    Network::Errno host_errno =
+        socket.Initialize(Network::Domain::INET, Network::Type::DGRAM, Network::Protocol::UDP);]=])
+        set(after [=[#ifdef __ANDROID__
+    int fds[2];
+    if (socketpair(AF_UNIX, SOCK_DGRAM, 0, fds) != 0) {
+        return Network::Errno::OTHER;
+    }
+    socket.Adopt(fds[0]);
+    wake_sender.Adopt(fds[1]);
+    const Network::Errno receiver_error = socket.SetNonBlock(true);
+    if (receiver_error != Network::Errno::SUCCESS) return receiver_error;
+    return wake_sender.SetNonBlock(true);
+#else
+    Network::Errno host_errno =
+        socket.Initialize(Network::Domain::INET, Network::Type::DGRAM, Network::Protocol::UDP);]=])
+    endif()
+    list(FIND core_sources "${source}" source_index)
+    if(source_index LESS 0)
+        message(FATAL_ERROR "Pinned offline ${patch} source target changed")
+    endif()
+    set(path "${CMAKE_SOURCE_DIR}/src/core/${source}")
+    file(READ "${path}" content)
+    pocket_replace_exact("${before}" "${after}" "${patch}")
+    if(patch STREQUAL "bsd")
+        set(before "/// Opens a non-blocking host loopback UDP socket")
+        set(after [=[#ifdef __ANDROID__
+class OfflineWakeSocket : public Network::Socket {
+public:
+    void Adopt(int socket_fd) { fd = socket_fd; }
+};
+#else
+using OfflineWakeSocket = Network::Socket;
+#endif
+
+/// Opens a non-blocking host wake socket]=])
+        pocket_replace_exact("${before}" "${after}" "bsd description")
+        pocket_replace_exact("    return socket.SetNonBlock(true);\n}"
+            "    return socket.SetNonBlock(true);\n#endif\n}" "bsd close")
+        pocket_replace_exact("OpenSignalSocket(Network::Socket& socket)"
+            "OpenSignalSocket(OfflineWakeSocket& socket, OfflineWakeSocket& wake_sender)" "bsd signature")
+        pocket_replace_exact("OpenSignalSocket(wake_socket)"
+            "OpenSignalSocket(wake_socket, wake_sender)" "bsd caller")
+        pocket_replace_exact("        const Network::Errno host_errno = wake_socket.Send(token, 0).second;"
+            "#ifdef __ANDROID__\n        const Network::Errno host_errno = wake_sender.Send(token, 0).second;\n#else\n        const Network::Errno host_errno = wake_socket.Send(token, 0).second;\n#endif" "bsd send")
+        pocket_replace_exact("    Network::Socket wake_socket;"
+            "    OfflineWakeSocket wake_socket;\n    OfflineWakeSocket wake_sender;" "bsd members")
+        pocket_replace_exact("#include <fmt/ranges.h>"
+            "#ifdef __ANDROID__\n#include <sys/socket.h>\n#endif\n#include <fmt/ranges.h>" "bsd include")
+    endif()
+    set(generated "${CMAKE_BINARY_DIR}/pocket-switch-sdk/offline-${patch}.cpp")
+    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/pocket-switch-sdk")
+    file(WRITE "${generated}" "${content}")
+    list(REMOVE_AT core_sources ${source_index})
+    list(APPEND core_sources "${generated}")
+endforeach()
+set_property(TARGET core PROPERTY SOURCES "${core_sources}")
+
 # The original Android JNI cache eagerly resolves Kotlin application models.
 foreach(property SOURCES INTERFACE_SOURCES)
     get_target_property(common_sources common ${property})

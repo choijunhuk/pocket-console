@@ -78,15 +78,14 @@ public final class Switch2PlayerActivity extends Activity
             getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
                     OnBackInvokedDispatcher.PRIORITY_DEFAULT, backCallback);
         }
-        DeviceCapabilities.Compatibility capability =
-                DeviceProbe.read(this).check(ConsoleType.SWITCH_TWO);
-        if (capability.state == DeviceCapabilities.Compatibility.State.UNSUPPORTED) {
-            message(capability.reason);
-            return;
-        }
         game = NativeLibrary.privatePath(this, getIntent().getStringExtra(EXTRA_GAME_PATH));
         if (game == null || !game.isFile() || game.length() == 0) {
-            message("가져온 Switch 2 파일을 찾을 수 없어요.");
+            message("가져온 Switch 홈브루 파일을 찾을 수 없어요.");
+            return;
+        }
+        DeviceCapabilities.Compatibility capability = DeviceProbe.read(this).check(ConsoleType.SWITCH);
+        if (capability.state != DeviceCapabilities.Compatibility.State.READY) {
+            message(capability.reason);
             return;
         }
         userRoot = new File(getFilesDir(), "switch2-user");
@@ -122,6 +121,7 @@ public final class Switch2PlayerActivity extends Activity
         stop.request();
         releaseInputs();
         NativeLibrary.detach(this);
+        if (!started) deleteCachedNro();
         if (Build.VERSION.SDK_INT >= 33 && backCallback != null) {
             getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(backCallback);
         }
@@ -176,6 +176,12 @@ public final class Switch2PlayerActivity extends Activity
     private void runSession(Surface surface) {
         boolean nativeSurface = false;
         try {
+            String diagnostic = NativeLibrary.switchVulkanDiagnostic();
+            if (ending || !surfaceReady || !surface.isValid()) return;
+            if (!diagnostic.isEmpty()) {
+                failure = diagnostic;
+                return;
+            }
             NativeLibrary.initialize(this, "pocket_switch2");
             NativeLibrary.setAppDirectory(userRoot.getAbsolutePath());
             if (!stop.arm(NativeLibrary::resetPocketStopRequest)) return;
@@ -216,6 +222,7 @@ public final class Switch2PlayerActivity extends Activity
             backendReady = false;
             stop.finish();
             sessionDone = true;
+            deleteCachedNro();
             runOnUiThread(() -> {
                 releaseInputs();
                 if (userExit) finish();
@@ -224,6 +231,11 @@ public final class Switch2PlayerActivity extends Activity
                 else message("게임 실행이 종료됐어요.");
             });
         }
+    }
+
+    private void deleteCachedNro() {
+        if (game != null && getIntent().getBooleanExtra("delete_cached_nro", false)
+                && game.getParentFile().equals(getCacheDir())) game.delete();
     }
 
     @Override public Context context() { return this; }

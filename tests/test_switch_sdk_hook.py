@@ -64,7 +64,26 @@ class ProjectHookTests(unittest.TestCase):
             root = pathlib.Path(temp)
             (root / "src/common/android").mkdir(parents=True)
             (root / "src/common/android/applets").mkdir(parents=True)
+            (root / "src/core/internal_network").mkdir(parents=True)
+            (root / "src/core/hle/service/sockets").mkdir(parents=True)
             (root / "src/android/app/src/main/jni").mkdir(parents=True)
+            (root / "src/core/internal_network/network.cpp").write_text(
+                "    case ENETDOWN:\n        return Errno::NETDOWN;\n")
+            (root / "src/core/hle/service/sockets/bsd.cpp").write_text(
+                """#include <fmt/ranges.h>
+/// Opens a non-blocking host loopback UDP socket
+Network::Errno OpenSignalSocket(Network::Socket& socket) {
+    Network::Errno host_errno =
+        socket.Initialize(Network::Domain::INET, Network::Type::DGRAM, Network::Protocol::UDP);
+    return socket.SetNonBlock(true);
+}
+OpenSignalSocket(wake_socket);
+        const Network::Errno host_errno = wake_socket.Send(token, 0).second;
+    Network::Socket wake_socket;
+""")
+            (root / "src/core/CMakeLists.txt").write_text(
+                "add_library(core STATIC internal_network/network.cpp "
+                "hle/service/sockets/bsd.cpp)\n")
             (root / "src/common/android/id_cache.cpp").write_text("void eager_cache() {}\n")
             (root / "src/common/android/applets/software_keyboard.cpp").write_text(
                 "void eager_keyboard() {}\n"
@@ -117,6 +136,7 @@ void waitLoop() {
                 "cmake_minimum_required(VERSION 3.19)\n"
                 "project(HokkaidoProbe LANGUAGES CXX)\n"
                 "add_library(common STATIC src/common/common.cpp)\n"
+                "add_subdirectory(src/core)\n"
                 "add_library(hook_impl SHARED src/common/hook.cpp)\n"
                 "add_library(main_hook SHARED src/common/hook.cpp)\n"
                 "target_sources(common PUBLIC src/common/android/id_cache.cpp)\n"
@@ -159,6 +179,87 @@ void waitLoop() {
             self.assertIn("if (!m_is_running || !m_window || pocket_stop_gate.Requested())", generated)
             self.assertIn("if (pocket_stop_gate.Requested()) return;\n    void(m_system.Run());", generated)
             self.assertIn('Settings::values.udp_input_servers.SetValue("");\n        m_input_subsystem.Initialize();', generated)
+            offline_bsd = (build / "pocket-switch-sdk/offline-bsd.cpp").read_text()
+            offline_net = (build / "pocket-switch-sdk/offline-network.cpp").read_text()
+            self.assertIn("socketpair(AF_UNIX, SOCK_DGRAM, 0, fds)", offline_bsd)
+            self.assertIn("wake_sender.Send(token, 0)", offline_bsd)
+            self.assertIn("case EPERM:", offline_net)
+            start = offline_bsd.index("#ifdef __ANDROID__\nclass OfflineWakeSocket")
+            function = offline_bsd.index("Network::Errno OpenSignalSocket", start)
+            end = offline_bsd.index("\n}\n", function) + 3
+            wake_source = offline_bsd[start:end]
+            send_line = "const Network::Errno host_errno = wake_sender.Send(token, 0).second;"
+            self.assertIn(send_line, offline_bsd)
+            errno_start = offline_net.index("    case ENETDOWN:")
+            errno_end = offline_net.index("        return Errno::NETDOWN;", errno_start) + len(
+                "        return Errno::NETDOWN;")
+            errno_source = offline_net[errno_start:errno_end]
+            probe = root / "offline-wake-probe.cpp"
+            probe.write_text("""#include <array>
+#include <cerrno>
+#include <fcntl.h>
+#include <poll.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#include <utility>
+#define __ANDROID__ 1
+namespace Network {
+enum class Errno { SUCCESS, NETDOWN, OTHER };
+enum class Domain { INET }; enum class Type { DGRAM }; enum class Protocol { UDP };
+class Socket {
+protected:
+    int fd = -1;
+public:
+    ~Socket() { if (fd >= 0) close(fd); }
+    int GetFD() const { return fd; }
+    Errno SetNonBlock(bool) {
+        return fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) == 0
+            ? Errno::SUCCESS : Errno::OTHER;
+    }
+    std::pair<int, Errno> Send(const std::array<unsigned char, 1>& token, int flags) {
+        int result = send(fd, token.data(), token.size(), flags);
+        return {result, result == 1 ? Errno::SUCCESS : Errno::OTHER};
+    }
+};
+}
+""" + wake_source + """
+Network::Errno TranslateError(int error) {
+    using Network::Errno;
+    switch (error) {
+""" + errno_source + """
+    default: return Errno::OTHER;
+    }
+}
+int main() {
+    if (TranslateError(EPERM) != Network::Errno::NETDOWN) return 9;
+    for (int i = 0; i < 8; ++i) {
+        int receiver_fd, sender_fd;
+        {
+            OfflineWakeSocket wake_socket, wake_sender;
+            if (OpenSignalSocket(wake_socket, wake_sender) != Network::Errno::SUCCESS) return 1;
+            receiver_fd = wake_socket.GetFD(); sender_fd = wake_sender.GetFD();
+            pollfd waiting{receiver_fd, POLLIN, 0};
+            if (poll(&waiting, 1, 0) != 0) return 2;
+            std::array<unsigned char, 1> token{'x'};
+            """ + send_line + """
+            if (host_errno != Network::Errno::SUCCESS) return 3;
+            if (poll(&waiting, 1, 100) != 1 || !(waiting.revents & POLLIN)) return 4;
+            unsigned char received;
+            if (recv(receiver_fd, &received, 1, 0) != 1 || received != 'x') return 5;
+            waiting.revents = 0;
+            if (poll(&waiting, 1, 0) != 0) return 6;
+        }
+        if (fcntl(receiver_fd, F_GETFD) != -1 || errno != EBADF) return 7;
+        if (fcntl(sender_fd, F_GETFD) != -1 || errno != EBADF) return 8;
+    }
+}
+""")
+            compile_probe = subprocess.run(
+                ["c++", "-std=c++20", str(probe), "-o", str(root / "offline-wake-probe")],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(compile_probe.returncode, 0, compile_probe.stderr)
+            self.assertEqual(subprocess.run([str(root / "offline-wake-probe")]).returncode, 0)
             native = root / "src/android/app/src/main/jni/native.cpp"
             native.write_text(native.read_text().replace(
                 "m_input_subsystem.Initialize();", "m_input_subsystem.Start();"))
@@ -171,6 +272,33 @@ void waitLoop() {
             )
             self.assertNotEqual(changed.returncode, 0)
             self.assertIn("Pinned offline_udp source seam changed", changed.stderr)
+
+            native.write_text(native.read_text().replace(
+                "m_input_subsystem.Start();", "m_input_subsystem.Initialize();"))
+            network = root / "src/core/internal_network/network.cpp"
+            network.write_text(network.read_text().replace("case ENETDOWN:", "case EHOSTDOWN:"))
+            changed_network = subprocess.run(
+                ["cmake", "-S", str(root), "-B", str(root / "changed-network"),
+                 "-DANDROID=ON", f"-DCMAKE_PROJECT_INCLUDE={HOOK}",
+                 f"-DPOCKET_HOKKAIDO_SOURCE_DIR={root}",
+                 f"-DPOCKET_SDK_SOURCE_DIR={HOOK.parent}"],
+                capture_output=True, text=True,
+            )
+            self.assertNotEqual(changed_network.returncode, 0)
+            self.assertIn("Pinned offline network source seam changed", changed_network.stderr)
+
+            network.write_text(network.read_text().replace("case EHOSTDOWN:", "case ENETDOWN:"))
+            bsd = root / "src/core/hle/service/sockets/bsd.cpp"
+            bsd.write_text(bsd.read_text().replace("Network::Domain::INET", "Network::Domain::INET6"))
+            changed_bsd = subprocess.run(
+                ["cmake", "-S", str(root), "-B", str(root / "changed-bsd"),
+                 "-DANDROID=ON", f"-DCMAKE_PROJECT_INCLUDE={HOOK}",
+                 f"-DPOCKET_HOKKAIDO_SOURCE_DIR={root}",
+                 f"-DPOCKET_SDK_SOURCE_DIR={HOOK.parent}"],
+                capture_output=True, text=True,
+            )
+            self.assertNotEqual(changed_bsd.returncode, 0)
+            self.assertIn("Pinned offline bsd source seam changed", changed_bsd.stderr)
 
     def test_unreviewed_native_target_stops_before_toolchain_setup(self):
         script = HOOK.parents[2] / "scripts/build-switch-probe.sh"

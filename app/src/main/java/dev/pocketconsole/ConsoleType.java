@@ -31,6 +31,11 @@ public enum ConsoleType {
         return false;
     }
 
+    public static boolean isSwitchHomebrew(String name) {
+        return name != null && name.toLowerCase(Locale.ROOT).endsWith(".nro")
+                && SWITCH.accepts(name);
+    }
+
     public static ConsoleType fromFileName(String name) {
         for (ConsoleType console : values()) {
             if (console.accepts(name)) return console;

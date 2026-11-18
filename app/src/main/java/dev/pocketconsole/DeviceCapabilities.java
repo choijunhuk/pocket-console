@@ -60,7 +60,13 @@ public final class DeviceCapabilities {
             if (glEsVersion < 0x30002) return result(Compatibility.State.UNSUPPORTED, "OpenGL ES 3.2 이상이 필요합니다.", advice);
             return result(Compatibility.State.READY, "3DS 기기 전제 조건을 충족합니다. 실제 EGL 생성은 실행 중 확인합니다.", advice);
         }
-        if (console == ConsoleType.SWITCH) return result(Compatibility.State.UNKNOWN, "Switch 하드웨어 기준은 아직 검증 중입니다.", advice);
+        if (console == ConsoleType.SWITCH) {
+            if (sdkVersion < 33) return result(Compatibility.State.UNSUPPORTED, "Android 13 (API 33) 이상이 필요합니다.", advice);
+            if (!hasArm64Abi) return result(Compatibility.State.UNSUPPORTED, "Switch 홈브루는 ARM64 기기가 필요합니다.", advice);
+            if (vulkanVersion == null) return result(Compatibility.State.UNKNOWN, "Vulkan 지원 여부를 확인할 수 없습니다.", advice);
+            if (vulkanVersion < 0x403000) return result(Compatibility.State.UNSUPPORTED, "Vulkan 1.3 이상이 필요합니다.", advice);
+            return result(Compatibility.State.READY, "실제 Vulkan 기능을 확인합니다.", advice);
+        }
         if (console == ConsoleType.SWITCH_TWO) {
             if (sdkVersion < 33) return result(Compatibility.State.UNSUPPORTED, "Android 13 (API 33) 이상이 필요합니다.", advice);
             if (!hasArm64Abi) return result(Compatibility.State.UNSUPPORTED, "Switch 2 후보 코어는 ARM64 ABI가 필요합니다.", advice);

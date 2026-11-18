@@ -31,6 +31,17 @@ public final class NativeLibrary {
     private NativeLibrary() {}
 
     public static native int probeNativeBridge();
+    public static native String pocketVulkanDiagnostic();
+
+    public static String switchVulkanDiagnostic() {
+        try {
+            System.loadLibrary("pocket_switch2");
+            String diagnostic = pocketVulkanDiagnostic();
+            return diagnostic == null ? "Vulkan 기능 확인에 실패했어요." : diagnostic;
+        } catch (LinkageError error) {
+            return "Switch 엔진 또는 Vulkan 진단 기능을 사용할 수 없어요.";
+        }
+    }
     public static native long resetPocketStopRequest();
     public static native void requestPocketStop(long generation);
     public static native void haltPocketSession(long generation);
