@@ -4,6 +4,25 @@
 
 The staged merge adds the pinned Switch SDK to Android debug and alpha-release packaging. The published alpha.4 APK below is unchanged and does **not** contain this integration. The same Pocket Console APK runs experimental original `.nro` homebrew; it does not launch another emulator. Source/runtime checks, emulator results and pending release gates are recorded in [Switch verification](switch-verification.md). No physical-device, Switch audio, commercial-game or Switch 2 game acceptance is claimed.
 
+## 0.3.0-alpha.6
+
+Published 2026-11-20 09:35:48 UTC as a public GitHub prerelease.
+
+- [Release and assets](https://github.com/choijunhuk/pocket-console/releases/tag/v0.3.0-alpha.6)
+- [Download APK](https://github.com/choijunhuk/pocket-console/releases/download/v0.3.0-alpha.6/PocketConsole-v0.3.0-alpha.6.apk)
+- [Complete release workflow](https://github.com/choijunhuk/pocket-console/actions/runs/44710488032): all nine jobs passed.
+- Source: `55a804ff11234d8a9a0f1d055897a0c71cbcec4e`; package `dev.pocketconsole`, code `9`, name `0.3.0-alpha.6`
+- APK: 36,822,555 bytes; SHA-256 `ec50edfd155c54cf0ee1753ae7e12133a4aa4bb2b2acf672dfba9409ce9d6ef5`
+- Source archive SHA-256: `56a78d77e573cf4a2af818446a5f766537619f4bf67a28efe22532e4e4f907fe`
+- Signer SHA-256 (DER): `e95c85ff0887c8bbcaebdb90238f4b6dd4ce0b8b5245f6b59c2aa15c49c5320a`, unchanged from earlier official alphas.
+- Switch SDK: unchanged pin, `switch-sdk.yml` run 44416880188, now also served from the permanent `switch-sdk-mirror` release.
+
+An independent public download matched `SHA256SUMS`, the official signer, code/name above, no requested permissions and the three ARM64 Switch libraries. It was installed over alpha.5 on a Galaxy S24 Ultra (SM-S928N, Android API 37, Adreno 750) as an in-place update; the Switch tab shows the key/firmware section with "키 없음 · 펌웨어 없음".
+
+Physical-device evidence from the alpha.5 build on the same phone: the unchanged original Switch homebrew smoke reported `JNI_LINK_PASS`, `SURFACE_VIEW_PASS` and `NRO_FRAME_INPUT_PASS` with no unsuitable-driver warnings (Adreno Vulkan driver 512.762.1, Vulkan 1.3.128); the production library launched the same `.nro` to its first frame; and the original 3DS homebrew showed its blue/red screens and turned the top screen green while A was held. This is the first physical Android 3DS and Switch execution record for the project.
+
+Key import was exercised only on a native ARM64 emulator with a synthetic key file: the `:switch2` service reached the engine's `installKeys`, which rejected the file, and no key file remained. Real user keys, firmware install, NSP/XCI loading through a SAF descriptor, commercial games, Switch audio and non-Adreno GPUs were not tested.
+
 ## 0.3.0-alpha.5
 
 Published 2026-11-18 23:39:48 UTC as a public GitHub prerelease.
