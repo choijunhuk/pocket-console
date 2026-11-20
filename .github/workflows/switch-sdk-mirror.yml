@@ -1,0 +1,55 @@
+name: Switch SDK mirror
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - third_party/switch-sdk.lock.json
+      - .github/workflows/switch-sdk-mirror.yml
+  workflow_dispatch:
+
+concurrency:
+  group: switch-sdk-mirror
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Mirror the pinned Switch SDK to a permanent release asset
+        run: |
+          set -euo pipefail
+          run_id="$(python3 -c "import json; print(json.load(open('third_party/switch-sdk.lock.json'))['run_id'])")"
+          head_sha="$(python3 -c "import json; print(json.load(open('third_party/switch-sdk.lock.json'))['head_sha'])")"
+          hokkaido="$(python3 -c "import json; print(json.load(open('third_party/switch-hokkaido.lock.json'))['commit'])")"
+          name="pocket-switch2-sdk-${run_id}.zip"
+          assets=""
+          if gh release view switch-sdk-mirror >/dev/null 2>&1; then
+            assets="$(gh release view switch-sdk-mirror --json assets --jq '.assets[].name')"
+          fi
+          if grep -qxF "$name" <<<"$assets"; then
+            python3 scripts/fetch-switch-sdk.py --zip-out "$RUNNER_TEMP/verify.zip"
+            echo "SWITCH_SDK_MIRROR_ALREADY_PRESENT asset=$name"
+            exit 0
+          fi
+          python3 scripts/fetch-switch-sdk.py --zip-out "$name"
+          if ! gh release view switch-sdk-mirror >/dev/null 2>&1; then
+            notes="Prebuilt engine libraries for Pocket Console CI, not a user download. Each asset pocket-switch2-sdk-<run_id>.zip is the output of this repository's switch-sdk.yml run named in third_party/switch-sdk.lock.json.
+
+          Corresponding source for the asset ${name}:
+          - Hokkaido (GPL-3.0-or-later), pinned commit: https://github.com/pavelgajdo/Hokkaido/tree/${hokkaido}
+          - Pocket Console adapter and build recipe, producer commit: https://github.com/choijunhuk/pocket-console/tree/${head_sha}
+          - Pinned submodules and dependencies are those recorded at that producer commit (.gitmodules, third_party/*.lock.json) and in the asset's source-lock.json and runtime-deps.json.
+
+          Pocket Console release source tarballs (PocketConsole-source-*.tar.gz) carry the source for their own release only; they do not necessarily match this asset, so use the commits above."
+            gh release create switch-sdk-mirror --prerelease --latest=false --title "Switch SDK mirror" --notes "$notes"
+          fi
+          gh release upload switch-sdk-mirror "$name"
+          echo "SWITCH_SDK_MIRROR_UPLOADED asset=$name"

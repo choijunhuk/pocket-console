@@ -133,7 +133,9 @@ class SwitchJniTests(unittest.TestCase):
             artifact["artifacts"][0]["digest"] = "sha256:" + "b" * 64
             artifact["artifacts"][0]["expired"] = True
             with patch.object(MODULE.subprocess, "check_output", side_effect=[
-                    json.dumps(run), json.dumps(artifact)]):
+                    json.dumps(run), json.dumps(artifact)]), patch.object(
+                    MODULE.subprocess, "run", return_value=MODULE.subprocess.CompletedProcess(
+                        [], 0, json.dumps({"assets": []}), "")):
                 with self.assertRaisesRegex(ValueError, "missing or expired"):
                     MODULE.verify_producer(self.producer)
 

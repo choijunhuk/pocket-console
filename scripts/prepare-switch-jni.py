@@ -57,8 +57,16 @@ def verify_producer(lock_path=PRODUCER_LOCK):
     artifacts = github(f"actions/runs/{run_id}/artifacts?per_page=100").get("artifacts", [])
     matches = [item for item in artifacts if item.get("name") == pin["artifact_name"]]
     if len(matches) != 1 or matches[0].get("expired"):
-        raise ValueError("Pinned Switch SDK artifact is missing or expired; rebuild and repin switch-sdk.yml")
-    if matches[0].get("digest") != "sha256:" + pin["artifact_sha256"]:
+        # Expired artifacts are fine when the permanent mirror holds the zip; fetch-switch-sdk.py verifies its bytes.
+        mirror = f"pocket-switch2-sdk-{run_id}.zip"
+        release = subprocess.run(["gh", "api", f"repos/{repository}/releases/tags/switch-sdk-mirror"],
+                                 capture_output=True, text=True)
+        if release.returncode and "HTTP 404" not in release.stderr:
+            raise ValueError("Switch SDK mirror lookup failed: " + release.stderr.strip())
+        assets = [] if release.returncode else json.loads(release.stdout).get("assets", [])
+        if not any(item.get("name") == mirror for item in assets):
+            raise ValueError("Pinned Switch SDK artifact is missing or expired; rebuild and repin switch-sdk.yml")
+    elif matches[0].get("digest") != "sha256:" + pin["artifact_sha256"]:
         raise ValueError("Pinned Switch SDK artifact SHA256 does not match GitHub metadata")
     print(f"SWITCH_SDK_PRODUCER_PASS run_id={run_id} head_sha={pin['head_sha']}")
     return run_id
