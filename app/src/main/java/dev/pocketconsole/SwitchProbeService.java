@@ -57,8 +57,8 @@ public final class SwitchProbeService extends Service {
             android.util.Log.w("PocketSwitchProbe", "SWITCH_PROBE_TIMEOUT");
             finishProbe(playerActive ? "Switch 실행 중에는 GPU를 확인할 수 없어요."
                     : "Switch GPU 진단 시간이 초과됐어요.", "");
-            // Native work may be wedged in the driver. Never kill an active player.
-            if (!playerActive) android.os.Process.killProcess(android.os.Process.myPid());
+            // Native work may be wedged in the driver. Never kill an active player or a key/firmware change.
+            if (!playerActive && !SwitchContentService.isBusy()) android.os.Process.killProcess(android.os.Process.myPid());
         };
         main.postDelayed(timeout, PROBE_TIMEOUT_MS);
         new Thread(() -> {

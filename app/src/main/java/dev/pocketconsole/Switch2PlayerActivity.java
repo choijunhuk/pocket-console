@@ -5,6 +5,9 @@ import android.app.Application;
 import android.content.Context;
 import android.content.Intent;
 import android.content.res.Configuration;
+import android.database.Cursor;
+import android.net.Uri;
+import android.provider.OpenableColumns;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.os.Build;
@@ -52,6 +55,8 @@ public final class Switch2PlayerActivity extends Activity
         implements SurfaceHolder.Callback, NativeLibrary.Listener {
     public static final String EXTRA_GAME_PATH = "switch2_game_path";
     public static final String EXTRA_FAILURE = "switch_launch_failure";
+    /** Unverified .nsp/.xci opened in place through the document provider, never copied. */
+    public static final String EXTRA_GAME_URI = "switch2_game_uri";
     // The original smoke allows 60s; successful local first frames arrive within a few seconds.
     private static final long FIRST_FRAME_TIMEOUT_MS = 45_000;
     private static final long FIRST_FRAME_TOTAL_CAP_MS = 120_000;
@@ -69,6 +74,8 @@ public final class Switch2PlayerActivity extends Activity
     private TextView gpuWarning;
     private SurfaceView display;
     private File game;
+    private String launchPath;
+    private String contentGame;
     private File cachedNro;
     private File userRoot;
     private volatile boolean backendReady;
@@ -153,8 +160,13 @@ public final class Switch2PlayerActivity extends Activity
                 android.util.Log.w("PocketSwitchPlayer", "Temporary NRO path check failed", error);
             }
         }
-        if (game == null || !game.isFile() || game.length() == 0) {
+        String contentUri = getIntent().getStringExtra(EXTRA_GAME_URI);
+        if (contentUri == null && (game == null || !game.isFile() || game.length() == 0)) {
             message("가져온 Switch 홈브루 파일을 찾을 수 없어요.");
+            return;
+        }
+        if (SwitchContentService.isBusy()) {
+            message("키 또는 펌웨어를 처리하는 중이에요. 끝난 뒤 다시 실행하세요.");
             return;
         }
         DeviceCapabilities.Compatibility capability = DeviceProbe.read(this).check(ConsoleType.SWITCH);
@@ -166,6 +178,18 @@ public final class Switch2PlayerActivity extends Activity
         if (!userRoot.isDirectory() && !userRoot.mkdirs()) {
             message("Switch 2 저장 공간을 준비하지 못했어요.");
             return;
+        }
+        if (contentUri != null) {
+            String problem = checkContentGame(contentUri);
+            if (problem != null) {
+                message(problem);
+                return;
+            }
+            NativeLibrary.allowContentUri(contentUri);
+            launchPath = contentUri;
+            contentGame = contentUri;
+        } else {
+            launchPath = game.getAbsolutePath();
         }
         display.getHolder().addCallback(this);
         preparation.update("기기 그래픽 확인", 0, 0);
@@ -248,7 +272,7 @@ public final class Switch2PlayerActivity extends Activity
 
     @Override public void surfaceCreated(SurfaceHolder holder) {
         surfaceReady = true;
-        if (game == null || ending || started) return;
+        if (launchPath == null || ending || started) return;
         started = true;
         surfaceReleased = new CountDownLatch(1);
         armFirstFrameWatchdog();
@@ -293,9 +317,41 @@ public final class Switch2PlayerActivity extends Activity
         }
     }
 
+    /** Shared with SwitchContentService: the engine system is initialized once per process. */
+    static synchronized void initializeEngineSystem(Context context) {
+        NativeLibrary.initializeGpuDriver(context.getApplicationInfo().nativeLibraryDir, "", "", "");
+        NativeLibrary.initializeSystem(systemInitialized);
+        systemInitialized = true;
+    }
+
+    /** Cheap checks that are safe on the UI thread. */
+    private String checkContentGame(String uriText) {
+        Uri uri = Uri.parse(uriText);
+        if (!"content".equals(uri.getScheme())) return "게임 문서 주소가 올바르지 않아요.";
+        if (!SwitchContentStatus.keysPresent(userRoot))
+            return "이 파일에는 본인 콘솔의 키가 필요해요. 라이브러리에서 키를 먼저 가져오세요.";
+        return null;
+    }
+
+    /** Provider queries: run on the session thread, never the UI thread. */
+    private String checkContentReadable(String uriText) {
+        Uri uri = Uri.parse(uriText);
+        String name = "";
+        try (Cursor cursor = getContentResolver().query(uri,
+                new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst() && cursor.getString(0) != null) name = cursor.getString(0);
+        } catch (RuntimeException ignored) {}
+        if (!ConsoleType.isSwitchContent(name)) return "지원하지 않는 파일 형식이에요. NSP 또는 XCI만 열 수 있어요.";
+        // The engine reads the size through the same helper; a document without one looks empty to it.
+        if (NativeLibrary.documentSize(getContentResolver(), uri) <= 0)
+            return "게임 파일을 읽을 수 없어요. 파일 접근 권한과 파일 크기를 확인하세요.";
+        return null;
+    }
+
     static boolean isProcessSessionActive() { return ACTIVE_PLAYERS.get() > 0; }
 
     private void clearProcessSessionActive() {
+        NativeLibrary.allowContentUri(null);
         if (activityCounted.compareAndSet(true, false)) ACTIVE_PLAYERS.decrementAndGet();
     }
 
@@ -316,6 +372,13 @@ public final class Switch2PlayerActivity extends Activity
     private void runSession(Surface surface) {
         boolean nativeSurface = false;
         try {
+            if (contentGame != null) {
+                String problem = checkContentReadable(contentGame);
+                if (problem != null) {
+                    failure = problem;
+                    return;
+                }
+            }
             String diagnostic = NativeLibrary.switchVulkanDiagnostic();
             if (ending || !surfaceReady || !surface.isValid()) return;
             if (!diagnostic.isEmpty()) {
@@ -334,10 +397,7 @@ public final class Switch2PlayerActivity extends Activity
             if (!stop.arm(NativeLibrary::resetPocketStopRequest)) return;
             backendReady = true;
             if (ending || !surfaceReady || !surface.isValid()) return;
-            NativeLibrary.initializeGpuDriver(
-                    getApplicationInfo().nativeLibraryDir, "", "", "");
-            NativeLibrary.initializeSystem(systemInitialized);
-            systemInitialized = true;
+            initializeEngineSystem(getApplicationContext());
             NativeInput.configureHandheld();
             inputReady = true;
             if (ending || !surfaceReady || !surface.isValid()) return;
@@ -349,7 +409,7 @@ public final class Switch2PlayerActivity extends Activity
                 preparation.update("첫 화면 대기", 0, 0);
                 presented = false;
                 nextProgram = -1;
-                NativeLibrary.run(game.getAbsolutePath(), program, frontend);
+                NativeLibrary.run(launchPath, program, frontend);
                 program = nextProgram;
                 frontend = false;
                 if (program >= 0 && !ending && surfaceReady) {

@@ -49,6 +49,16 @@ import java.io.IOException;
 public final class MainActivity extends Activity {
     private static final int PICK_FILE = 10;
     private static final int PLAY_SWITCH = 11;
+    private static final int PICK_KEYS = 12;
+    private static final int PICK_FIRMWARE = 13;
+    /** True while a key or firmware request owns the library; only that request may clear it. */
+    private static boolean contentBusy;
+    private static int contentSerial;
+    private static long contentDeadline;
+    /** Result of the last request, shown by whichever activity is alive (or on next resume). */
+    private static String pendingNotice;
+    private static WeakReference<MainActivity> live = new WeakReference<>(null);
+    private static final long IMPORT_STALE_MS = 15 * 60_000;
     private static final String KEY_SWITCH_NRO = "active_switch_nro";
     private static final ExecutorService SWITCH_IO = Executors.newSingleThreadExecutor();
     private static String switchProbeDiagnostic;
@@ -190,6 +200,8 @@ public final class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        live = new WeakReference<>(this);
+        if (pendingNotice != null) { notice = pendingNotice; pendingNotice = null; }
         uiPreferences.registerOnSharedPreferenceChangeListener(selectionChanged);
         libraryPreferences.registerOnSharedPreferenceChangeListener(libraryChanged);
         ConsoleType restored = consoleForId(uiPreferences.getString(KEY_CONSOLE, null));
@@ -198,6 +210,7 @@ public final class MainActivity extends Activity {
     }
 
     @Override protected void onPause() {
+        if (live.get() == this) live = new WeakReference<>(null);
         uiPreferences.unregisterOnSharedPreferenceChangeListener(selectionChanged);
         libraryPreferences.unregisterOnSharedPreferenceChangeListener(libraryChanged);
         super.onPause();
@@ -263,17 +276,50 @@ public final class MainActivity extends Activity {
     }
 
     private boolean launchable(LibraryStore.Entry entry) {
-        if (entry.console == ConsoleType.SWITCH) {
-            return ConsoleType.isSwitchHomebrew(entry.name) && switchPackaged
-                    && switchPresenceChecked && switchDiagnostic.isEmpty()
+        if (entry.console == ConsoleType.SWITCH || entry.console == ConsoleType.SWITCH_TWO) {
+            boolean engine = switchPackaged && switchPresenceChecked && switchDiagnostic.isEmpty()
                     && compatibility(ConsoleType.SWITCH).state
                     == DeviceCapabilities.Compatibility.State.READY;
+            // .nro keeps its original behavior: Switch tab only, no keys involved.
+            if (ConsoleType.isSwitchHomebrew(entry.name)) return entry.console == ConsoleType.SWITCH && engine;
+            return engine && !contentBusy && SwitchContentStatus.contentLaunchable(entry.name, keysPresent());
         }
         return launchable(entry.console);
     }
 
+    private static boolean isSwitchContent(LibraryStore.Entry entry) {
+        return (entry.console == ConsoleType.SWITCH || entry.console == ConsoleType.SWITCH_TWO)
+                && ConsoleType.isSwitchContent(entry.name);
+    }
+
+    private File switchRoot() { return SwitchContentStatus.userRoot(getFilesDir()); }
+
+    private boolean keysPresent() { return SwitchContentStatus.keysPresent(switchRoot()); }
+
+    /** Why a library file cannot open right now, in the user's terms. */
+    private String unavailableReason(LibraryStore.Entry entry) {
+        if (isSwitchContent(entry)) {
+            if (!switchPackaged) return "Switch 엔진이 이 빌드에 없어요.";
+            if (!keysPresent()) return "NSP/XCI를 열려면 본인 콘솔에서 덤프한 키가 필요해요. 키 가져오기를 먼저 하세요.";
+            if (contentBusy) return "키 또는 펌웨어를 처리하는 중이에요. 잠시 뒤 다시 시도하세요.";
+            return switchPresenceChecked ? switchDiagnostic.isEmpty() ? compatibility(ConsoleType.SWITCH).reason
+                    : switchDiagnostic : "기기 조건을 확인하는 중이에요.";
+        }
+        return entryReadiness(entry);
+    }
+
+    /** A .nro in the Switch 2 tab stays registration-only; the key label applies to NSP/XCI only. */
+    private String entryReadiness(LibraryStore.Entry entry) {
+        return entry.console == ConsoleType.SWITCH_TWO && !isSwitchContent(entry)
+                ? "목록 등록만 지원" : readiness(entry.console);
+    }
+
     private String readiness(ConsoleType type) {
-        if (type == ConsoleType.SWITCH_TWO) return "실험적 지원 · 엔진 준비 중";
+        if (type == ConsoleType.SWITCH_TWO) {
+            if (!switchPresenceChecked) return "기기 조건 확인 중";
+            if (!switchPackaged) return "엔진 준비 중";
+            return switchDiagnostic.isEmpty() ? "실험적 실행 · 사용자 키 필요" : "기기 조건 미충족";
+        }
         if (type == ConsoleType.SWITCH) {
             if (!switchPresenceChecked) return "기기 조건 확인 중";
             if (!switchPackaged) return "엔진 준비 중";
@@ -442,13 +488,16 @@ public final class MainActivity extends Activity {
                 : selected == ConsoleType.SWITCH ? check.state == DeviceCapabilities.Compatibility.State.READY
                         ? switchDiagnostic.isEmpty() ? switchWarning : switchDiagnostic : check.reason
                 : (selected == ConsoleType.DS || selected == ConsoleType.THREE_DS)
-                ? check.reason : "게임 실행 엔진이 아직 연결되지 않았어요. 기다려도 실행되지 않으며, 현재는 파일 등록과 조작 미리보기만 가능해요.";
+                ? check.reason : switchPackaged && switchPresenceChecked && switchDiagnostic.isEmpty()
+                ? "Switch 2 파일은 본인 콘솔에서 덤프한 키로 실험적으로 열어볼 수 있어요. 호환성은 확인되지 않았어요."
+                : "게임 실행 엔진을 사용할 수 없어요. 기다려도 실행되지 않으며, 현재는 파일 등록과 조작 미리보기만 가능해요.";
         page.addView(text(detail, 13, QUIET, false));
         gap(page, 12);
         Button importButton = button("파일 가져오기", ORANGE, ui.onAccent);
         importButton.setContentDescription("기기에서 " + selected.label + " 게임 파일 가져오기");
         page.addView(importButton, new LinearLayout.LayoutParams(-1, dp(54)));
         importButton.setOnClickListener(v -> importFile());
+        if (selected == ConsoleType.SWITCH || selected == ConsoleType.SWITCH_TWO) drawSwitchContent();
         gap(page, 20);
 
         LinearLayout heading = row();
@@ -501,18 +550,20 @@ public final class MainActivity extends Activity {
 
     private void drawEntry(LibraryStore.Entry entry) {
         boolean canPlay = launchable(entry);
+        boolean content = isSwitchContent(entry);
         boolean experimental = entry.console == ConsoleType.THREE_DS || entry.console == ConsoleType.SWITCH;
-        String action = canPlay ? (experimental ? "실험적 실행" : "실행") : "실행 불가";
-        String accessibleAction = canPlay ? (experimental
+        String action = canPlay ? (content ? SwitchContentStatus.EXPERIMENTAL_LABEL
+                : experimental ? "실험적 실행" : "실행") : "실행 불가";
+        String accessibleAction = canPlay ? (content || experimental
                 ? "실험적 실행, 게임 호환성 미확인" : "게임 실행")
-                : "실행 불가, " + (entry.console == ConsoleType.SWITCH
-                        && !ConsoleType.isSwitchHomebrew(entry.name)
-                        ? "NSP/XCI는 목록 등록만 지원합니다." : readiness(entry.console));
-        Button item = button(entry.name + "  ·  " + action, ui.raised, INK);
+                : "실행 불가, " + unavailableReason(entry);
+        Button item = button(entry.name + (content && canPlay ? "\n" : "  ·  ") + action, ui.raised, INK);
         item.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
         item.setPadding(dp(16), 0, dp(16), 0);
         item.setContentDescription(entry.name + ", " + entry.console.label + " 파일, " + accessibleAction);
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(60));
+        item.setMinHeight(dp(60));
+        item.setMinimumHeight(dp(60));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
         params.bottomMargin = dp(8);
         page.addView(item, params);
         item.setOnClickListener(v -> openEntry(entry));
@@ -536,6 +587,10 @@ public final class MainActivity extends Activity {
             if (data != null) showNotice(data.getStringExtra(Switch2PlayerActivity.EXTRA_FAILURE));
             // A probe refused while a player was live is not cached; retry it now that play ended.
             if (!switchDiagnostic.isEmpty()) checkSwitchBackend();
+            return;
+        }
+        if (request == PICK_KEYS || request == PICK_FIRMWARE) {
+            handleContentPick(request, result, data);
             return;
         }
         if (request != PICK_FILE) return;
@@ -598,6 +653,10 @@ public final class MainActivity extends Activity {
 
     private void openEntry(LibraryStore.Entry entry) {
         if (launchable(entry)) {
+            if (isSwitchContent(entry)) {
+                launchSwitchContent(entry);
+                return;
+            }
             if (entry.console == ConsoleType.SWITCH) {
                 launchSwitchHomebrew(entry);
                 return;
@@ -626,11 +685,11 @@ public final class MainActivity extends Activity {
                     String reason = activity.compatibility(entry.console).state
                             == DeviceCapabilities.Compatibility.State.UNSUPPORTED
                             ? activity.compatibility(entry.console).reason
-                            : entry.console == ConsoleType.SWITCH
-                            ? ConsoleType.isSwitchHomebrew(entry.name) ? activity.switchDiagnostic
-                                    : "NSP/XCI는 목록 등록만 지원합니다."
+                            : isSwitchContent(entry) ? activity.unavailableReason(entry)
+                            : entry.console == ConsoleType.SWITCH && ConsoleType.isSwitchHomebrew(entry.name)
+                            ? activity.switchDiagnostic
                             : "게임 실행 엔진을 아직 사용할 수 없어요.";
-                    new AlertDialog.Builder(activity).setTitle(activity.readiness(entry.console))
+                    new AlertDialog.Builder(activity).setTitle(activity.entryReadiness(entry))
                             .setMessage(entry.name + "\n\n" + reason
                                     + " 기다려도 자동으로 실행되지 않아요. 조작 미리보기에서 버튼 배치만 확인할 수 있어요.")
                             .setPositiveButton("조작 미리보기", (dialog, which) -> { activity.selected = entry.console; activity.preview = true; activity.render(); })
@@ -658,6 +717,7 @@ public final class MainActivity extends Activity {
     }
 
     private void sweepSwitchNros() {
+        sweepImports();
         // A second library instance must not unlink a live player's private copy.
         ActivityManager manager = getSystemService(ActivityManager.class);
         List<ActivityManager.RunningAppProcessInfo> processes = manager.getRunningAppProcesses();
@@ -669,6 +729,274 @@ public final class MainActivity extends Activity {
                 name.startsWith("switch-nro-") && name.endsWith(".nro"));
         if (stale != null) for (File file : stale) {
             if (!file.equals(switchNro)) file.delete();
+        }
+    }
+
+    /** Leftover key or firmware imports hold user files; stale ones go even while :switch2 is alive. */
+    private void sweepImports() {
+        if (contentBusy) return;
+        File[] imports = getCacheDir().listFiles((directory, name) -> name.startsWith("switch-import-"));
+        if (imports == null) return;
+        long now = System.currentTimeMillis();
+        for (File dir : imports) {
+            long newest = dir.lastModified();
+            File[] children = dir.listFiles();
+            if (children != null) for (File child : children) newest = Math.max(newest, child.lastModified());
+            if (now - newest > IMPORT_STALE_MS) deleteTemp(dir);
+        }
+    }
+
+    private void launchSwitchContent(LibraryStore.Entry entry) {
+        if (switchLaunching) return;
+        switchLaunching = true;
+        // No copy: the player reads the document in place through the provider.
+        Intent player = new Intent(this, Switch2PlayerActivity.class)
+                .putExtra(Switch2PlayerActivity.EXTRA_GAME_URI, entry.uri);
+        try {
+            startActivityForResult(player, PLAY_SWITCH);
+        } catch (RuntimeException launchError) {
+            switchLaunching = false;
+            showNotice("Switch 실행 화면을 열 수 없어요.");
+        }
+    }
+
+    private void drawSwitchContent() {
+        if (!switchPackaged) return;
+        gap(page, 16);
+        page.addView(text("내 콘솔 키와 펌웨어", 16, INK, true));
+        gap(page, 4);
+        boolean keys = keysPresent();
+        int files = SwitchContentStatus.firmwareFileCount(switchRoot());
+        TextView state = text(SwitchContentStatus.describe(keys, files,
+                files == 0 ? "" : SwitchContentStatus.firmwareVersion(switchRoot())), 14, INK, false);
+        state.setContentDescription("키와 펌웨어 상태, " + state.getText());
+        page.addView(state);
+        gap(page, 4);
+        page.addView(text("본인 콘솔에서 직접 덤프한 prod.keys(와 title.keys)와 펌웨어 zip만 쓰세요. "
+                + "파일은 이 기기 앱 안에만 보관되고 화면·로그·백업·네트워크로 내보내지 않아요. "
+                + "NSP/XCI 실행은 실험적이며 호환성은 확인되지 않았어요.", 12, QUIET, false));
+        gap(page, 8);
+        // Firmware is verified by the engine, which needs the same device conditions as a game.
+        boolean engineOk = switchPresenceChecked && switchDiagnostic.isEmpty();
+        LinearLayout add = row();
+        Button importKeys = button("키 가져오기", SHELL, INK);
+        importKeys.setEnabled(!contentBusy);
+        importKeys.setContentDescription("prod.keys 또는 title.keys 가져오기");
+        LinearLayout.LayoutParams left = new LinearLayout.LayoutParams(0, -2, 1);
+        left.rightMargin = dp(8);
+        add.addView(importKeys, left);
+        Button importFirmware = button("펌웨어 가져오기", SHELL, INK);
+        importFirmware.setEnabled(!contentBusy && engineOk);
+        importFirmware.setContentDescription(engineOk ? "펌웨어 zip 가져오기"
+                : "펌웨어 zip 가져오기, 기기 조건을 확인한 뒤 사용할 수 있어요");
+        add.addView(importFirmware, new LinearLayout.LayoutParams(0, -2, 1));
+        page.addView(add);
+        importKeys.setOnClickListener(v -> pickContent(PICK_KEYS));
+        importFirmware.setOnClickListener(v -> pickContent(PICK_FIRMWARE));
+        if (keys || files > 0) {
+            gap(page, 8);
+            LinearLayout remove = row();
+            if (keys) {
+                Button deleteKeys = button("키 삭제", SHELL, INK);
+                deleteKeys.setEnabled(!contentBusy);
+                deleteKeys.setOnClickListener(v -> confirmContentDelete(true));
+                LinearLayout.LayoutParams first = new LinearLayout.LayoutParams(0, -2, 1);
+                if (files > 0) first.rightMargin = dp(8);
+                remove.addView(deleteKeys, first);
+            }
+            if (files > 0) {
+                Button deleteFirmware = button("펌웨어 삭제", SHELL, INK);
+                deleteFirmware.setEnabled(!contentBusy);
+                deleteFirmware.setOnClickListener(v -> confirmContentDelete(false));
+                remove.addView(deleteFirmware, new LinearLayout.LayoutParams(0, -2, 1));
+            }
+            page.addView(remove);
+        }
+    }
+
+    private void pickContent(int request) {
+        if (contentBusy) { showNotice(BUSY_MESSAGE); return; }
+        if (request == PICK_FIRMWARE && !(switchPresenceChecked && switchDiagnostic.isEmpty())) {
+            showNotice("펌웨어는 기기 조건 확인이 끝난 뒤에 가져올 수 있어요.");
+            return;
+        }
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.setType("*/*");
+        if (request == PICK_FIRMWARE) intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{
+                "application/zip", "application/x-zip-compressed", "application/octet-stream"});
+        if (request == PICK_KEYS) intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try { startActivityForResult(intent, request); }
+        catch (RuntimeException e) { showNotice("파일 선택기를 열 수 없어요."); }
+    }
+
+    private static final String BUSY_MESSAGE = "다른 키·펌웨어 작업이 끝나기를 기다려 주세요.";
+
+    private void confirmContentDelete(boolean keys) {
+        new AlertDialog.Builder(this).setTitle(keys ? "키를 삭제할까요?" : "펌웨어를 삭제할까요?")
+                .setMessage(keys ? "이 기기에 가져온 키를 모두 지웁니다. 원본 파일은 삭제되지 않아요."
+                        : "이 기기에 가져온 펌웨어를 지웁니다. 원본 zip은 삭제되지 않아요.")
+                .setPositiveButton("삭제", (dialog, which) -> {
+                    if (contentBusy) { showNotice(BUSY_MESSAGE); return; }
+                    showNotice("처리하고 있어요…");
+                    startContent(getApplicationContext(), keys ? SwitchContentService.DELETE_KEYS
+                            : SwitchContentService.DELETE_FIRMWARE, new String[0], beginContent());
+                })
+                .setNegativeButton("유지", null).show();
+    }
+
+    private void handleContentPick(int request, int result, Intent data) {
+        if (result != RESULT_OK || data == null) {
+            showNotice("가져오기를 취소했어요.");
+            return;
+        }
+        java.util.ArrayList<Uri> picked = new java.util.ArrayList<>();
+        if (data.getClipData() != null) {
+            for (int i = 0; i < data.getClipData().getItemCount(); i++)
+                picked.add(data.getClipData().getItemAt(i).getUri());
+        } else if (data.getData() != null) {
+            picked.add(data.getData());
+        }
+        if (contentBusy) { showNotice(BUSY_MESSAGE); return; }
+        if (picked.isEmpty() || (request == PICK_FIRMWARE && picked.size() != 1)) {
+            showNotice(request == PICK_FIRMWARE ? "펌웨어 zip은 하나만 선택해 주세요." : "가져올 키 파일을 선택해 주세요.");
+            return;
+        }
+        int id = beginContent();
+        showNotice(request == PICK_KEYS ? "키 파일을 확인하고 있어요…"
+                : "펌웨어 zip을 복사하고 있어요. 몇 분 걸릴 수 있어요.");
+        // Application context only: a rotation or back press mid-copy must not drop the import.
+        Context app = getApplicationContext();
+        DOCUMENT_IO.execute(() -> {
+            File dir = null;
+            String error = null;
+            java.util.List<String> paths = new java.util.ArrayList<>();
+            try {
+                dir = Files.createTempDirectory(app.getCacheDir().toPath(), "switch-import-").toFile();
+                ContentResolver resolver = app.getContentResolver();
+                for (Uri uri : picked) {
+                    String name = displayName(resolver, uri);
+                    File copy;
+                    if (request == PICK_KEYS) {
+                        if (!SwitchKeyFile.isAcceptedName(name)) {
+                            error = "prod.keys 또는 title.keys 파일만 가져올 수 있어요. 파일 이름을 확인하세요.";
+                            break;
+                        }
+                        copy = new File(dir, name.toLowerCase(java.util.Locale.ROOT));
+                        if (copy.exists()) { error = "같은 키 파일을 두 번 골랐어요."; break; }
+                        try (InputStream in = resolver.openInputStream(uri)) {
+                            if (in == null) throw new IOException();
+                            SwitchKeyFile.Check check = SwitchKeyFile.copyChecked(in, copy);
+                            if (!check.ok()) { error = check.message(); break; }
+                        }
+                    } else {
+                        copy = new File(dir, "firmware.zip");
+                        error = copyFirmware(resolver, uri, copy);
+                        if (error != null) break;
+                    }
+                    paths.add(copy.getAbsolutePath());
+                }
+            } catch (IOException | RuntimeException failure) {
+                error = "파일을 읽을 수 없어요. 파일 접근 권한과 저장 공간을 확인하세요.";
+            }
+            File temp = dir;
+            String problem = error;
+            MAIN.post(() -> {
+                if (problem != null) {
+                    if (temp != null) deleteTemp(temp);
+                    finishContent(id, problem);
+                    return;
+                }
+                startContent(app, request == PICK_KEYS ? SwitchContentService.INSTALL_KEYS
+                        : SwitchContentService.INSTALL_FIRMWARE, paths.toArray(new String[0]), id);
+            });
+        });
+    }
+
+    /** Copies at most the zip cap; returns a Korean reason on failure. */
+    private static String copyFirmware(ContentResolver resolver, Uri uri, File copy) throws IOException {
+        try (InputStream in = resolver.openInputStream(uri)) {
+            if (in == null) throw new IOException();
+            long size = 0;
+            byte[] buffer = new byte[256 * 1024];
+            try (OutputStream out = Files.newOutputStream(copy.toPath())) {
+                int read;
+                while ((read = in.read(buffer)) >= 0) {
+                    size += read;
+                    if (size > SwitchFirmwareZip.MAX_TOTAL_BYTES) return "펌웨어 zip이 너무 커요.";
+                    out.write(buffer, 0, read);
+                }
+            }
+            if (size == 0) return "비어 있는 파일이에요.";
+            // The extracted NCAs need about the same space again.
+            if (copy.getUsableSpace() < size + (256L << 20)) return "저장 공간이 부족해요. 펌웨어 크기만큼 비워 주세요.";
+        }
+        return null;
+    }
+
+    private static void deleteTemp(File dir) {
+        File[] children = dir.listFiles();
+        if (children != null) for (File child : children) child.delete();
+        dir.delete();
+    }
+
+    /** Marks the library busy and returns the id of the request that now owns the flag. */
+    private static int beginContent() {
+        contentBusy = true;
+        int id = ++contentSerial;
+        armContentDeadline(id, 10 * 60_000L);
+        return id;
+    }
+
+    /** A stalled provider or a dead :switch2 must not lock the library; only the owning request is released. */
+    private static void armContentDeadline(int id, long delayMs) {
+        // Re-arming moves the deadline; an older timer that fires early sees it and does nothing.
+        contentDeadline = android.os.SystemClock.uptimeMillis() + delayMs;
+        MAIN.postDelayed(() -> {
+            if (id == contentSerial && contentBusy && android.os.SystemClock.uptimeMillis() >= contentDeadline)
+                finishContent(id, "작업이 오래 걸려 중단했어요. 다시 시도하세요.");
+        }, delayMs);
+    }
+
+    /** Clears busy only for the request that set it, then shows the outcome to the live activity. */
+    private static void finishContent(int id, String message) {
+        if (id == contentSerial) contentBusy = false;
+        MainActivity activity = live.get();
+        if (message != null) {
+            if (activity != null && !activity.isDestroyed() && !activity.isFinishing()) activity.showNotice(message);
+            else pendingNotice = message;
+        } else if (activity != null && !activity.isDestroyed() && !activity.isFinishing() && !activity.preview) {
+            activity.render();
+        }
+    }
+
+    private static void startContent(Context app, String action, String[] paths, int id) {
+        boolean firmware = SwitchContentService.INSTALL_FIRMWARE.equals(action);
+        armContentDeadline(id, firmware ? 16 * 60_000L : 90_000L);
+        try {
+            SwitchContentService.start(app, action, paths, new ContentReceiver(id));
+        } catch (RuntimeException error) {
+            for (String path : paths) deleteTemp(new File(path).getParentFile());
+            finishContent(id, "Switch 프로세스를 시작하지 못했어요.");
+        }
+    }
+
+    /** Static so no activity is retained; the result goes to whichever activity is live. */
+    private static final class ContentReceiver extends ResultReceiver {
+        private final int id;
+
+        ContentReceiver(int id) {
+            super(MAIN);
+            this.id = id;
+        }
+
+        @Override protected void onReceiveResult(int code, Bundle data) {
+            String message = data == null ? null : data.getString(SwitchContentService.MESSAGE);
+            if (message == null) message = "결과를 확인하지 못했어요.";
+            // The service process exits shortly after key changes; hold off launching meanwhile.
+            String shown = message;
+            MAIN.postDelayed(() -> finishContent(id, shown), 1_500);
         }
     }
 

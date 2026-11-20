@@ -36,6 +36,12 @@ public enum ConsoleType {
                 && SWITCH.accepts(name);
     }
 
+    public static boolean isSwitchContent(String name) {
+        if (name == null) return false;
+        String lower = name.toLowerCase(Locale.ROOT);
+        return (lower.endsWith(".nsp") || lower.endsWith(".xci")) && SWITCH.accepts(name);
+    }
+
     public static ConsoleType fromFileName(String name) {
         for (ConsoleType console : values()) {
             if (console.accepts(name)) return console;

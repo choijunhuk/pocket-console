@@ -1,6 +1,11 @@
 package org.yuzu.yuzu_emu;
 
+import android.content.ContentResolver;
 import android.content.Context;
+import android.database.Cursor;
+import android.net.Uri;
+import android.os.ParcelFileDescriptor;
+import android.provider.OpenableColumns;
 
 import java.io.File;
 import java.io.IOException;
@@ -198,18 +203,20 @@ public final class NativeLibrary {
     }
 
     public static boolean exists(String path) {
+        if (isAllowedContent(path)) return contentSize(path) >= 0;
         File file = privatePath(path);
         return file != null && file.exists();
     }
 
     public static String getFileExtension(String path) {
         if (path == null) return "";
-        String name = new File(path).getName();
+        String name = isAllowedContent(path) ? contentName(path) : new File(path).getName();
         int index = name.lastIndexOf('.');
         return index < 0 ? "" : name.substring(index + 1).toLowerCase(Locale.ROOT);
     }
 
     public static String getParentDirectory(String path) {
+        if (isAllowedContent(path)) return null;
         File file = privatePath(path);
         if (file == null) return null;
         String parent = file.getParent();
@@ -217,24 +224,87 @@ public final class NativeLibrary {
     }
 
     public static String getFilename(String path) {
+        if (isAllowedContent(path)) return contentName(path);
         File file = privatePath(path);
         return file == null ? "" : file.getName();
     }
 
     public static long getSize(String path) {
+        if (isAllowedContent(path)) return Math.max(0, contentSize(path));
         File file = privatePath(path);
         return file == null ? 0 : file.length();
     }
 
     public static boolean isDirectory(String path) {
+        if (isAllowedContent(path)) return false;
         File file = privatePath(path);
         return file != null && file.isDirectory();
     }
 
-    public static int openContentUri(String path, String mode) {
-        // shortcut: content URIs are unsupported, add a validated SAF bridge before direct provider loading.
+    /** The single document the player may read through the provider; every other content URI is refused. */
+    private static volatile String allowedContentUri;
+
+    public static void allowContentUri(String uri) { allowedContentUri = uri; }
+
+    private static boolean isAllowedContent(String path) {
+        return path != null && path.equals(allowedContentUri);
+    }
+
+    private static ContentResolver contentResolver() {
+        Listener owner = current();
+        return owner == null ? null : owner.context().getContentResolver();
+    }
+
+    private static String contentName(String path) {
+        ContentResolver resolver = contentResolver();
+        if (resolver == null) return "";
+        try (Cursor cursor = resolver.query(Uri.parse(path),
+                new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst() && cursor.getString(0) != null) return cursor.getString(0);
+        } catch (RuntimeException ignored) {}
+        return "";
+    }
+
+    private static long contentSize(String path) {
+        ContentResolver resolver = contentResolver();
+        return resolver == null ? -1 : documentSize(resolver, Uri.parse(path));
+    }
+
+    /**
+     * Size the engine will see: the descriptor's size, else the provider's SIZE column; -1 when the
+     * document cannot be opened or reports no positive size (the engine treats that as an empty file).
+     */
+    public static long documentSize(ContentResolver resolver, Uri uri) {
+        long size;
+        try (ParcelFileDescriptor file = resolver.openFileDescriptor(uri, "r")) {
+            if (file == null) return -1;
+            size = file.getStatSize();
+        } catch (IOException | RuntimeException error) {
+            return -1;
+        }
+        if (size > 0) return size;
+        try (Cursor cursor = resolver.query(uri, new String[]{OpenableColumns.SIZE}, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst() && !cursor.isNull(0)) return cursor.getLong(0) > 0 ? cursor.getLong(0) : -1;
+        } catch (RuntimeException ignored) {}
         return -1;
     }
+
+    /** Read-only descriptor handed to the engine, which owns and closes it. */
+    public static int openContentUri(String path, String mode) {
+        ContentResolver resolver = contentResolver();
+        if (resolver == null || !isAllowedContent(path) || !"r".equals(mode)) return -1;
+        try {
+            ParcelFileDescriptor file = resolver.openFileDescriptor(Uri.parse(path), "r");
+            return file == null ? -1 : file.detachFd();
+        } catch (IOException | RuntimeException error) {
+            return -1;
+        }
+    }
+
+    /** Upstream user-supplied key and firmware checks; results map to FirmwareManager::KeyInstallResult. */
+    public static native int installKeys(String path, String extension);
+    public static native boolean isFirmwareAvailable();
+    public static native String firmwareVersion();
 
     private static native void initJvm();
     public static native void setAppDirectory(String path);

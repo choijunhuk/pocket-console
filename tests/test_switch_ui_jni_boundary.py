@@ -35,9 +35,14 @@ class SwitchUiJniBoundaryTest(unittest.TestCase):
         self.assertLess(session.index("NativeLibrary.switchVulkanDiagnostic()"),
                         session.index("NativeLibrary.initialize(this, \"pocket_switch2\")"))
         self.assertLess(session.index("if (!diagnostic.isEmpty())"),
-                        session.index("NativeLibrary.initializeGpuDriver("))
+                        session.index("initializeEngineSystem("))
+        helper = player.split("static synchronized void initializeEngineSystem", 1)[1].split("\n    }\n", 1)[0]
+        self.assertIn("NativeLibrary.initializeGpuDriver(", helper)
+        self.assertLess(helper.index("NativeLibrary.initializeGpuDriver("),
+                        helper.index("NativeLibrary.initializeSystem("))
         self.assertIn("ConsoleType.isSwitchHomebrew(entry.name)", main)
-        self.assertIn("NSP/XCI는 목록 등록만 지원합니다.", main)
+        # NSP/XCI are no longer registration-only: they need user keys and stay labeled unverified.
+        self.assertIn("SwitchContentStatus.contentLaunchable(entry.name, keysPresent())", main)
 
 
 if __name__ == "__main__":

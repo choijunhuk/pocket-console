@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- User-supplied Switch keys and firmware never leave the device through backup or transfer. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="switch2-user/keys" />
+        <exclude domain="file" path="switch2-user/nand/system" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="switch2-user/keys" />
+        <exclude domain="file" path="switch2-user/nand/system" />
+    </device-transfer>
+</data-extraction-rules>
